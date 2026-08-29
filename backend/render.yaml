@@ -24,3 +24,9 @@ services:
         value: gpt-4o-mini
       - key: AI_COMPANION_MAX_TOKENS
         value: "600"
+      # Pin the Python version: Render's current default (3.14) is too new
+      # for pydantic-core's prebuilt wheels, which forces a from-source
+      # Rust build that fails in Render's build sandbox. 3.11 has wheels
+      # for every pinned dependency here.
+      - key: PYTHON_VERSION
+        value: "3.11.9"
