@@ -5,10 +5,13 @@
 # occasional bursts of use.
 #
 # Note: Render's free tier has an ephemeral filesystem, so the SQLite file
-# (usage log + tokens) is wiped on redeploy/restart. That's fine for a
-# single-term course; if you want the log to survive restarts, attach a
-# free persistent disk (Render dashboard -> your service -> Disks) mounted
-# at /data and set AI_COMPANION_DB=/data/companion.db as an env var.
+# is wiped on redeploy/restart. Student TOKENS survive this fine (they're
+# self-verifying, signed with ADMIN_TOKEN -- see tokens.py) but the USAGE
+# LOG does not: export it (export_log.py) before you redeploy if you care
+# about that history, or attach a free persistent disk (Render dashboard ->
+# your service -> Disks) mounted at /data and set
+# AI_COMPANION_DB=/data/companion.db as an env var if you want it to survive
+# automatically.
 
 services:
   - type: web
@@ -26,6 +29,8 @@ services:
         value: gpt-4o-mini
       - key: AI_COMPANION_MAX_TOKENS
         value: "600"
+      - key: DEFAULT_DAILY_LIMIT
+        value: "60"
       # Pin the Python version: Render's current default (3.14) is too new
       # for pydantic-core's prebuilt wheels, which forces a from-source
       # Rust build that fails in Render's build sandbox. 3.11 has wheels

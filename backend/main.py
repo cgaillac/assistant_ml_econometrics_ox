@@ -13,7 +13,6 @@ Deploy: see ../README.md for Render instructions.
 """
 
 import os
-import secrets
 import time
 
 from fastapi import FastAPI, Header, HTTPException
@@ -22,10 +21,12 @@ from openai import OpenAI
 
 import prompts
 import store
+import tokens
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 MAX_TOKENS = int(os.environ.get("AI_COMPANION_MAX_TOKENS", "600"))
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
+DEFAULT_DAILY_LIMIT = int(os.environ.get("DEFAULT_DAILY_LIMIT", "60"))
 
 app = FastAPI(title="Oxford ML Course AI Companion")
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -40,17 +41,34 @@ def _authenticate(authorization: str | None) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or malformed Authorization header")
     token = authorization.removeprefix("Bearer ").strip()
+
+    # Token validity is checked by its signature, NOT by a database lookup --
+    # this is what lets tokens survive Render redeploys/restarts, which wipe
+    # the SQLite file. See tokens.py.
+    student_label = tokens.verify_token(token)
+    if student_label is None:
+        raise HTTPException(401, "Invalid token")
+
+    token_hash = store.hash_token(token)
+    # The DB row is used ONLY as an optional override for a custom daily
+    # limit set at issuance time; if it's missing (e.g. the database was
+    # reset by a redeploy since this token was issued), fall back to the
+    # default rather than rejecting the token.
     record = store.lookup_token(token)
-    if record is None:
-        raise HTTPException(401, "Unknown or revoked token")
-    used = store.usage_today(record["token_hash"])
-    if used >= record["daily_limit"]:
+    daily_limit = record["daily_limit"] if record else DEFAULT_DAILY_LIMIT
+
+    used = store.usage_today(token_hash)
+    if used >= daily_limit:
         raise HTTPException(
             429,
-            f"Daily limit reached ({record['daily_limit']} requests/24h). "
+            f"Daily limit reached ({daily_limit} requests/24h). "
             "Contact the instructor if you need more.",
         )
-    return record
+    return {
+        "student_label": student_label,
+        "token_hash": token_hash,
+        "daily_limit": daily_limit,
+    }
 
 
 def _check_admin(x_admin_token: str | None):
@@ -273,7 +291,13 @@ def generate_tokens_endpoint(
     _check_admin(x_admin_token)
     results = []
     for label in req.labels:
-        token = secrets.token_urlsafe(24)
+        # Deterministic + signed (see tokens.py): the same label always
+        # produces the same token, and the token stays valid across
+        # redeploys even if this store.add_token() row gets wiped by
+        # Render's ephemeral filesystem. The DB write below is just to
+        # remember a custom daily_limit for this student -- not required
+        # for the token to work.
+        token = tokens.issue_token(label)
         store.add_token(label, token, daily_limit=req.daily_limit)
         results.append(GeneratedToken(student_label=label, token=token))
     return GenerateTokensResponse(tokens=results)
