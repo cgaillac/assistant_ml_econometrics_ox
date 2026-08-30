@@ -104,6 +104,27 @@ def usage_today(token_hash: str) -> int:
         return row["n"]
 
 
+def get_session_history(session_id: str):
+    """Prior turns of a bounded multi-turn session (Skeptical Reviewer,
+    conceptual hints), as OpenAI-style {role, content} messages in order --
+    lets the model actually see what it asked before and what the student
+    said, instead of answering each turn from scratch with no memory of
+    the conversation. Called BEFORE the current turn is logged, so it
+    naturally excludes the in-progress exchange.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT request_text, response_text FROM usage_log "
+            "WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+    messages = []
+    for r in rows:
+        messages.append({"role": "user", "content": r["request_text"]})
+        messages.append({"role": "assistant", "content": r["response_text"]})
+    return messages
+
+
 def export_usage_log(limit: int = 500, student_label: str | None = None):
     """Newest-first rows from usage_log, for the admin log-export endpoint."""
     with _conn() as conn:

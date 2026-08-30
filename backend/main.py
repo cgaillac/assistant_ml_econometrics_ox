@@ -13,6 +13,7 @@ Deploy: see ../README.md for Render instructions.
 """
 
 import os
+import re
 import time
 
 from fastapi import FastAPI, Header, HTTPException
@@ -96,6 +97,36 @@ def _call_openai(system_prompt: str, user_message: str, extra_messages=None) -> 
     return resp.choices[0].message.content
 
 
+# Chat models routinely wrap code in a markdown fence even when told not
+# to. The client wraps whatever "code" it gets in its OWN fence for
+# display, so an unstripped fence from the model produces visibly nested/
+# broken fences. These two helpers guarantee a clean split regardless of
+# whether the model followed the "no fences, one optional NOTE: line"
+# instructions in prompts.py -- belt and suspenders around a prompt
+# instruction that's a strong nudge, not a guarantee.
+
+_FENCE_RE = re.compile(r"^```(?:\w+)?\s*\n(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _strip_code_fence(text: str) -> str:
+    text = text.strip()
+    m = _FENCE_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    # Unbalanced fence (opening ``` with no matching close, or vice versa) --
+    # just drop stray fence-only lines rather than leaving them in.
+    lines = [ln for ln in text.split("\n") if ln.strip() not in ("```", "```python")]
+    return "\n".join(lines).strip()
+
+
+def _split_trailing_note(text: str) -> tuple[str, str | None]:
+    lines = text.rstrip().split("\n")
+    if lines and re.match(r"^NOTE:\s*", lines[-1].strip(), re.IGNORECASE):
+        note = re.sub(r"^NOTE:\s*", "", lines[-1].strip(), flags=re.IGNORECASE)
+        return "\n".join(lines[:-1]).strip(), note or None
+    return text, None
+
+
 # ---------------------------------------------------------------------------
 # Part A: delegated implementation code
 # ---------------------------------------------------------------------------
@@ -108,6 +139,7 @@ class AssistRequest(BaseModel):
 class AssistResponse(BaseModel):
     step: str
     code: str
+    note: str | None = None
 
 
 @app.post("/v1/assist", response_model=AssistResponse)
@@ -118,18 +150,35 @@ def assist(req: AssistRequest, authorization: str | None = Header(None)):
         raise HTTPException(
             404,
             f"Unknown step '{req.step}'. Valid steps: "
-            f"{', '.join(prompts.PART_A_STEPS)}",
+            f"{', '.join(prompts.PART_A_STEPS)}. Or call ai.list_steps() "
+            "to see them with descriptions.",
         )
     system_prompt = prompts._DELEGATION_GUARDRAIL
     user_message = step_def["task"]
     if req.student_note:
         user_message += f"\n\nStudent's note (context only, not a new task): {req.student_note}"
-    result = _call_openai(system_prompt, user_message)
+    raw = _call_openai(system_prompt, user_message)
+    code, note = _split_trailing_note(raw)
+    code = _strip_code_fence(code)
     store.log_exchange(
         record["token_hash"], record["student_label"], "assist",
-        req.step, None, user_message, result, MODEL,
+        req.step, None, user_message, raw, MODEL,
     )
-    return AssistResponse(step=req.step, code=result)
+    return AssistResponse(step=req.step, code=code, note=note)
+
+
+@app.get("/v1/steps")
+def list_steps(authorization: str | None = Header(None)):
+    """Just the valid step IDs + labels for ask_implementation_helper --
+    metadata only, no OpenAI call, so this doesn't count against the
+    daily rate limit (only checks the token signature, not usage)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or malformed Authorization header")
+    if tokens.verify_token(authorization.removeprefix("Bearer ").strip()) is None:
+        raise HTTPException(401, "Invalid token")
+    return {
+        step: step_def["label"] for step, step_def in prompts.PART_A_STEPS.items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +211,13 @@ def skeptical_reviewer(req: ReviewerRequest, authorization: str | None = Header(
     if is_final:
         user_message += f"\n\n[SYSTEM NOTE: {prompts.SKEPTICAL_REVIEWER_SUMMARY_INSTRUCTION}]"
 
-    reply = _call_openai(system_prompt, user_message)
+    # Prior turns of THIS session, so the model actually remembers what it
+    # asked and what the student said -- without this, every exchange
+    # (including the final "summary") would be answered from scratch with
+    # no memory of the conversation, despite the exchange counter making it
+    # look like a continuous dialogue.
+    history = store.get_session_history(session_id)
+    reply = _call_openai(system_prompt, user_message, extra_messages=history)
 
     store.increment_session_turn(session_id)
     store.log_exchange(
@@ -209,7 +264,8 @@ def conceptual_hint(req: ConceptualHintRequest, authorization: str | None = Head
     if is_final:
         user_message += f"\n\n[SYSTEM NOTE: {prompts.CONCEPTUAL_HINT_FINAL_INSTRUCTION}]"
 
-    reply = _call_openai(system_prompt, user_message)
+    history = store.get_session_history(session_id)
+    reply = _call_openai(system_prompt, user_message, extra_messages=history)
 
     store.increment_session_turn(session_id)
     store.log_exchange(
