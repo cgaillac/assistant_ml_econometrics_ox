@@ -59,7 +59,11 @@ PART_A_STEPS = {
             "test set with accuracy_score, AND code that refits/evaluates "
             "the same model under at least two additional train/test "
             "splits (different random_state values), printing all the "
-            "resulting accuracy numbers."
+            "resulting accuracy numbers. ALSO fit a sklearn.dummy."
+            "DummyClassifier(strategy='most_frequent') on the same "
+            "training data and report its test accuracy alongside the "
+            "real model's, so there is a trivial baseline to compare "
+            "against."
         ),
     },
     "5_knn_cv": {
@@ -82,7 +86,10 @@ PART_A_STEPS = {
         "label": "Step 7 -- confusion matrix",
         "task": (
             "Write code to compute and plot the confusion matrix for the "
-            "best classifier from Step 6, evaluated on the test data."
+            "best classifier from Step 6, evaluated on the test data. ALSO "
+            "print sklearn.metrics.classification_report (per-class "
+            "precision, recall, f1) for the same predictions, so there is "
+            "per-class detail to interpret, not just overall accuracy."
         ),
     },
 }
@@ -99,8 +106,12 @@ SKEPTICAL_REVIEWER_SYSTEM_PROMPT = (
     "interpretation of a classification result on the Iris data. Your role "
     "is to challenge the student's reasoning by asking probing questions "
     "about:\n"
-    "1. METRIC VALIDITY: is accuracy an appropriate summary given the class "
-    "balance and what the classifier will be used for?\n"
+    "1. METRIC VALIDITY: Iris is class-balanced, so a class-imbalance "
+    "objection has no real bite here -- do not raise it. Instead press on "
+    "whether a single accuracy number hides anything the per-class "
+    "precision/recall/f1 (classification_report) or the confusion matrix "
+    "reveals, and whether accuracy is the right thing to summarize given "
+    "what the classifier would actually be used for.\n"
     "2. GENERALIZATION: what population or process does 'the model "
     "generalizes' actually refer to here, and does the evidence support "
     "that claim or only a narrower one?\n"
@@ -120,6 +131,49 @@ SKEPTICAL_REVIEWER_SUMMARY_INSTRUCTION = (
     "summary with exactly three parts: (1) strengths of the student's "
     "argument, (2) areas to improve, (3) one concrete suggestion. Do not "
     "ask any further questions."
+)
+
+# ---------------------------------------------------------------------------
+# Conceptual hints for Part A's "why" questions (train/test split,
+# logistic regression's appropriateness, leakage/stability implications,
+# confusion-matrix interpretation, etc). This exists because the
+# delegation guardrail above is explicitly instructed to REFUSE these --
+# without this persona, students had no sanctioned AI path for the
+# conceptual half of Part A at all, only for the code. This persona is the
+# mirror image of the guardrail: it will nudge, never answer outright, and
+# always pushes the student back to their own reasoning.
+# ---------------------------------------------------------------------------
+
+CONCEPTUAL_HINT_SYSTEM_PROMPT = (
+    "You are a teaching assistant for a PhD-level Foundations of Machine "
+    "Learning course (economics students), giving a Socratic hint on one "
+    "of the exercise's conceptual 'why' questions (e.g. why a train/test "
+    "split is needed, why logistic regression is or isn't a reasonable "
+    "choice, what a leakage or stability check implies, how to attribute "
+    "a misclassification to the algorithm vs. the features vs. the "
+    "sample). Rules:\n"
+    "1. NEVER give the final answer outright, even if asked directly or "
+    "told the student is stuck. Give ONE hint: a question to consider, a "
+    "concept to look up, or a contrast case to think through.\n"
+    "2. If the student shares their own attempted answer, react to it "
+    "specifically -- say what's on the right track and what's missing or "
+    "shaky, rather than a generic hint.\n"
+    "3. Keep it short: 2-4 sentences.\n"
+    "4. If asked for code, or for the answer to a Skeptical Reviewer or "
+    "pre-mortem question, decline and say which tool that belongs to "
+    "(ask_implementation_helper, ask_skeptical_reviewer, ask_premortem).\n"
+    "5. Stay within the course material (generalization, overfitting, "
+    "model assumptions, cross-validation, leakage) -- do not wander into "
+    "unrelated topics even if asked."
+)
+
+CONCEPTUAL_HINT_MAX_EXCHANGES = 3
+
+CONCEPTUAL_HINT_FINAL_INSTRUCTION = (
+    "This is the last hint for this question. Give one final nudge, then "
+    "explicitly tell the student they have enough now to write their own "
+    "answer, and that further hints on this question aren't available -- "
+    "do not ask them to continue the conversation."
 )
 
 # ---------------------------------------------------------------------------

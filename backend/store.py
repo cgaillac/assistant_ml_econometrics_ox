@@ -104,6 +104,27 @@ def usage_today(token_hash: str) -> int:
         return row["n"]
 
 
+def export_usage_log(limit: int = 500, student_label: str | None = None):
+    """Newest-first rows from usage_log, for the admin log-export endpoint."""
+    with _conn() as conn:
+        if student_label:
+            rows = conn.execute(
+                "SELECT student_label, persona, step, session_id, "
+                "request_text, response_text, model, created_at "
+                "FROM usage_log WHERE student_label = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (student_label, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT student_label, persona, step, session_id, "
+                "request_text, response_text, model, created_at "
+                "FROM usage_log ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def log_exchange(
     token_hash, student_label, persona, step, session_id,
     request_text, response_text, model,

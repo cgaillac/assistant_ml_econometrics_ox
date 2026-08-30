@@ -22,8 +22,8 @@ student's notebook  --pip installed client-->  your backend  --your key-->  Open
   a log of every exchange.
 - `client/` -- the `oxford_ml_ai` package students `pip install`. It has no
   access to the API key and cannot send a custom system prompt -- it only
-  exposes `ask_implementation_helper`, `ask_skeptical_reviewer`, and
-  `ask_premortem`.
+  exposes `ask_implementation_helper`, `ask_conceptual_hint`,
+  `ask_skeptical_reviewer`, and `ask_premortem`.
 
 ## 1. Deploy the backend
 
@@ -96,6 +96,22 @@ curl https://your-app.onrender.com/v1/whoami -H "Authorization: Bearer <a-token-
 > disk and point `AI_COMPANION_DB` at it (commented instructions are in
 > `render.yaml`).
 
+## 2b. Reading back the usage log
+
+Every exchange is logged server-side, but Render's free tier gives you no
+shell access to read the SQLite file directly -- `export_log.py` (same
+stdlib-only, no-install pattern as `generate_tokens.py`) pulls it back over
+HTTP instead:
+
+```bash
+python export_log.py --base-url https://your-app.onrender.com --admin-token YOUR_ADMIN_TOKEN
+python export_log.py --base-url https://your-app.onrender.com --admin-token YOUR_ADMIN_TOKEN --student student01   # one student only
+```
+
+Writes `usage_log_export.csv` -- useful both for spot-checking the course's
+own "Robustness & Verification Appendix" claims and as a light
+academic-integrity signal.
+
 ## 3. Give students the client package
 
 Simplest distribution without publishing to PyPI: push this whole repo (or
@@ -118,6 +134,10 @@ ai.configure(token="the-token-you-were-given")   # cached locally after first ru
 # Part A -- delegated implementation (won't answer the "why", only the code)
 ai.ask_implementation_helper("2_split")
 ai.ask_implementation_helper("6_gridsearch")
+
+# Part A's "why" questions -- the mirror image: nudges, never the final answer
+ai.ask_conceptual_hint("Why is a train/test split needed here?", your_thinking="I think...")
+ai.reset_hint_session()   # before switching to a different question
 
 # Part B, Step 8 -- Skeptical Reviewer (bounded to 5 exchanges)
 ai.ask_skeptical_reviewer("My interpretation of the confusion matrix is ...")

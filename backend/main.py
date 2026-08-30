@@ -53,6 +53,17 @@ def _authenticate(authorization: str | None) -> dict:
     return record
 
 
+def _check_admin(x_admin_token: str | None):
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            500,
+            "Server has no ADMIN_TOKEN configured -- set it as an "
+            "environment variable on the deployed service.",
+        )
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(401, "Invalid or missing X-Admin-Token header")
+
+
 def _call_openai(system_prompt: str, user_message: str, extra_messages=None) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     if extra_messages:
@@ -149,6 +160,53 @@ def skeptical_reviewer(req: ReviewerRequest, authorization: str | None = Header(
 
 
 # ---------------------------------------------------------------------------
+# Conceptual hints (bounded multi-turn) -- the mirror image of /v1/assist:
+# where /v1/assist refuses conceptual "why" questions and only writes code,
+# this refuses to write code or give the final answer, and only nudges.
+# ---------------------------------------------------------------------------
+
+class ConceptualHintRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+
+
+class ConceptualHintResponse(BaseModel):
+    session_id: str
+    reply: str
+    exchange_number: int
+    is_final: bool
+
+
+@app.post("/v1/conceptual-hint", response_model=ConceptualHintResponse)
+def conceptual_hint(req: ConceptualHintRequest, authorization: str | None = Header(None)):
+    record = _authenticate(authorization)
+    session_id, prior_turns = store.get_or_create_session(
+        req.session_id, "conceptual_hint", record["token_hash"]
+    )
+    exchange_number = prior_turns + 1
+    is_final = exchange_number >= prompts.CONCEPTUAL_HINT_MAX_EXCHANGES
+
+    system_prompt = prompts.CONCEPTUAL_HINT_SYSTEM_PROMPT
+    user_message = req.message
+    if is_final:
+        user_message += f"\n\n[SYSTEM NOTE: {prompts.CONCEPTUAL_HINT_FINAL_INSTRUCTION}]"
+
+    reply = _call_openai(system_prompt, user_message)
+
+    store.increment_session_turn(session_id)
+    store.log_exchange(
+        record["token_hash"], record["student_label"], "conceptual_hint",
+        None, session_id, req.message, reply, MODEL,
+    )
+    return ConceptualHintResponse(
+        session_id=session_id,
+        reply=reply,
+        exchange_number=exchange_number,
+        is_final=is_final,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Part B, Step 9: Pre-mortem (single turn)
 # ---------------------------------------------------------------------------
 
@@ -212,21 +270,49 @@ class GenerateTokensResponse(BaseModel):
 def generate_tokens_endpoint(
     req: GenerateTokensRequest, x_admin_token: str | None = Header(None)
 ):
-    if not ADMIN_TOKEN:
-        raise HTTPException(
-            500,
-            "Server has no ADMIN_TOKEN configured -- set it as an "
-            "environment variable on the deployed service.",
-        )
-    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(401, "Invalid or missing X-Admin-Token header")
-
+    _check_admin(x_admin_token)
     results = []
     for label in req.labels:
         token = secrets.token_urlsafe(24)
         store.add_token(label, token, daily_limit=req.daily_limit)
         results.append(GeneratedToken(student_label=label, token=token))
     return GenerateTokensResponse(tokens=results)
+
+
+# ---------------------------------------------------------------------------
+# Admin: read back the usage log.
+#
+# Without this, the logging in store.log_exchange() is write-only -- the
+# whole point was to give the instructor something to spot-check for the
+# course's own grading appendix and for light academic-integrity review,
+# but Render's free tier has no shell access to the deployed filesystem.
+# This is the only way to actually get the data back out.
+# ---------------------------------------------------------------------------
+
+class UsageLogRow(BaseModel):
+    student_label: str
+    persona: str
+    step: str | None
+    session_id: str | None
+    request_text: str
+    response_text: str
+    model: str
+    created_at: float
+
+
+class UsageLogResponse(BaseModel):
+    rows: list[UsageLogRow]
+
+
+@app.get("/admin/usage-log", response_model=UsageLogResponse)
+def usage_log_endpoint(
+    x_admin_token: str | None = Header(None),
+    student_label: str | None = None,
+    limit: int = 500,
+):
+    _check_admin(x_admin_token)
+    rows = store.export_usage_log(limit=limit, student_label=student_label)
+    return UsageLogResponse(rows=[UsageLogRow(**r) for r in rows])
 
 
 @app.get("/healthz")

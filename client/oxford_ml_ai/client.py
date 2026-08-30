@@ -23,13 +23,14 @@ import requests
 
 _CONFIG_PATH = Path.home() / ".oxford_ml_ai" / "config.json"
 _DEFAULT_BASE_URL = os.environ.get(
-    "OXFORD_AI_BASE_URL", "https://oxford-ml-ai-companion.onrender.com"
+    "OXFORD_AI_BASE_URL", "https://REPLACE-WITH-YOUR-DEPLOYED-URL.onrender.com"
 )
 
 _state = {
     "token": os.environ.get("OXFORD_AI_TOKEN"),
     "base_url": _DEFAULT_BASE_URL,
     "reviewer_session_id": None,
+    "hint_session_id": None,
 }
 
 
@@ -111,6 +112,38 @@ def ask_implementation_helper(step: str, note: str = "") -> str:
     result = _post("/v1/assist", {"step": step, "student_note": note})
     _display(f"**AI-generated code for `{step}`:**\n\n```python\n{result['code']}\n```")
     return result["code"]
+
+
+# ---------------------------------------------------------------------------
+# Conceptual hints -- for the "why" questions Part A leaves to you.
+# ask_implementation_helper refuses these on purpose; this is the
+# sanctioned AI path for them instead. It nudges, it does not answer.
+# ---------------------------------------------------------------------------
+
+def ask_conceptual_hint(question: str, your_thinking: str = "") -> str:
+    """Get a Socratic hint (never the final answer) on one of the
+    conceptual "why" questions in Part A. Capped at 3 exchanges per
+    question (server-enforced) -- call reset_hint_session() to start a
+    fresh question. Sharing your own attempt in `your_thinking` gets you a
+    much more specific hint than leaving it blank.
+    """
+    message = question
+    if your_thinking:
+        message += f"\n\nWhat I'm thinking so far: {your_thinking}"
+    result = _post(
+        "/v1/conceptual-hint",
+        {"message": message, "session_id": _state["hint_session_id"]},
+    )
+    _state["hint_session_id"] = result["session_id"]
+    header = f"**Hint ({result['exchange_number']}/3):**"
+    if result["is_final"]:
+        header += " _last hint for this question_"
+    _display(f"{header}\n\n{result['reply']}")
+    return result["reply"]
+
+
+def reset_hint_session():
+    _state["hint_session_id"] = None
 
 
 # ---------------------------------------------------------------------------
