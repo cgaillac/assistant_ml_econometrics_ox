@@ -13,6 +13,7 @@ Deploy: see ../README.md for Render instructions.
 """
 
 import os
+import secrets
 import time
 
 from fastapi import FastAPI, Header, HTTPException
@@ -24,6 +25,7 @@ import store
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 MAX_TOKENS = int(os.environ.get("AI_COMPANION_MAX_TOKENS", "600"))
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 app = FastAPI(title="Oxford ML Course AI Companion")
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -178,6 +180,53 @@ def whoami(authorization: str | None = Header(None)):
         "requests_used_today": used,
         "daily_limit": record["daily_limit"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Admin: issue student tokens directly in the deployed database.
+#
+# This exists because the deployed backend and your laptop do NOT share a
+# filesystem: a script that wrote tokens into a local SQLite file (the
+# original version of generate_tokens.py) was creating tokens in a database
+# the live app never reads. This endpoint creates tokens in the SAME
+# database your deployed app uses, so students given a token from it can
+# actually authenticate against the live server. Protected by a separate
+# secret (ADMIN_TOKEN, not OPENAI_API_KEY) -- see generate_tokens.py.
+# ---------------------------------------------------------------------------
+
+class GenerateTokensRequest(BaseModel):
+    labels: list[str]
+    daily_limit: int = 60
+
+
+class GeneratedToken(BaseModel):
+    student_label: str
+    token: str
+
+
+class GenerateTokensResponse(BaseModel):
+    tokens: list[GeneratedToken]
+
+
+@app.post("/admin/generate-tokens", response_model=GenerateTokensResponse)
+def generate_tokens_endpoint(
+    req: GenerateTokensRequest, x_admin_token: str | None = Header(None)
+):
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            500,
+            "Server has no ADMIN_TOKEN configured -- set it as an "
+            "environment variable on the deployed service.",
+        )
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(401, "Invalid or missing X-Admin-Token header")
+
+    results = []
+    for label in req.labels:
+        token = secrets.token_urlsafe(24)
+        store.add_token(label, token, daily_limit=req.daily_limit)
+        results.append(GeneratedToken(student_label=label, token=token))
+    return GenerateTokensResponse(tokens=results)
 
 
 @app.get("/healthz")

@@ -20,6 +20,8 @@ services:
     envVars:
       - key: OPENAI_API_KEY
         sync: false
+      - key: ADMIN_TOKEN
+        sync: false
       - key: OPENAI_MODEL
         value: gpt-4o-mini
       - key: AI_COMPANION_MAX_TOKENS

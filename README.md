@@ -46,20 +46,48 @@ exercise.
 
 ## 2. Issue student tokens
 
+`generate_tokens.py` talks to your **deployed** backend over HTTPS -- it
+does not touch any local database. (An earlier version wrote tokens into a
+local SQLite file, which the deployed app never reads; if you tried that
+and got "1 token generated" with garbled output, that's why -- use this
+version instead.) It needs nothing beyond the Python standard library, so
+you do not need to `pip install -r requirements.txt` just for this step.
+
+First, set an admin secret on the deployed service (Render dashboard ->
+your service -> Environment -> Add Environment Variable -> `ADMIN_TOKEN` =
+any long random string, e.g. from
+`python -c "import secrets; print(secrets.token_urlsafe(24))"`) and let it
+redeploy.
+
+Then create a text file with one student label per line. **Do not use
+`echo -e ... > students.txt` in Windows cmd.exe** -- it does not interpret
+`-e` or `\n` and writes one garbled line instead (this is what happened if
+your `tokens_output.csv` had one weird row instead of one row per student).
+The reliable way on any platform:
+
 ```bash
-cd backend
-pip install -r requirements.txt
-echo -e "student01\nstudent02\nstudent03" > students.txt   # one label per line
-python generate_tokens.py --labels students.txt --daily-limit 60
+python -c "open('students.txt','w').write('student01\nstudent02\nstudent03\n')"
 ```
 
-This writes `tokens_output.csv` (label, token). Distribute each row
-individually and privately (e.g. one-per-student via your LMS's private
-feedback/assignment channel) -- not as a shared spreadsheet, since a token
-is effectively a password against your OpenAI spend.
+(or just create `students.txt` by hand in a text editor.) Then:
 
-Re-run `generate_tokens.py` any time to add students or rotate a
-compromised token (it overwrites by label).
+```bash
+cd backend
+python generate_tokens.py --base-url https://your-app.onrender.com --admin-token YOUR_ADMIN_TOKEN --labels students.txt --daily-limit 60
+```
+
+This writes `tokens_output.csv` (label, token) using tokens the live
+server actually recognizes. Distribute each row individually and privately
+(e.g. one-per-student via your LMS's private feedback/assignment channel)
+-- not as a shared spreadsheet, since a token is effectively a password
+against your OpenAI spend.
+
+Re-run any time to add students or rotate a compromised token (it
+overwrites by label). Verify one immediately with:
+
+```bash
+curl https://your-app.onrender.com/v1/whoami -H "Authorization: Bearer <a-token-from-the-csv>"
+```
 
 > Note on Render's free tier: its filesystem is ephemeral, so tokens and
 > logs stored in the default SQLite file are wiped on redeploy/restart. For
