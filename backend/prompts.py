@@ -42,7 +42,7 @@ Edit the text here to match your own course; nothing else needs to change.
 
 # ---------------------------------------------------------------------------
 
-DELEGATION_GUARDRAIL = (
+_DELEGATION_GUARDRAIL = (
 "You are a coding assistant for a PhD-level Foundations of Machine "
 "Learning exercise (economics students). For the step described below, "
 "you produce a CODE SKELETON, not a finished, directly-runnable "
