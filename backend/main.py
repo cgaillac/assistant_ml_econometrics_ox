@@ -121,10 +121,35 @@ def _strip_code_fence(text: str) -> str:
 
 def _split_trailing_note(text: str) -> tuple[str, str | None]:
     lines = text.rstrip().split("\n")
-    if lines and re.match(r"^NOTE:\s*", lines[-1].strip(), re.IGNORECASE):
-        note = re.sub(r"^NOTE:\s*", "", lines[-1].strip(), flags=re.IGNORECASE)
+    if lines and re.match(r"^\**NOTE:?\**\s*", lines[-1].strip(), re.IGNORECASE):
+        note = re.sub(r"^\**NOTE:?\**\s*", "", lines[-1].strip(), flags=re.IGNORECASE)
         return "\n".join(lines[:-1]).strip(), note or None
     return text, None
+
+
+# Whether to show the "this tool doesn't answer conceptual questions"
+# disclaimer used to depend on the MODEL noticing a question in the
+# student's note and appending a "NOTE: ..." line itself -- unreliable
+# with a small model and a long, multi-rule system prompt (it often just
+# didn't do it). Detecting "does this note contain a question" ourselves
+# is a much smaller, more reliable job than getting an LLM to reliably
+# follow a conditional instruction buried in a longer prompt, so the
+# server now decides deterministically instead of trusting the model's
+# compliance.
+_QUESTION_RE = re.compile(
+    r"\?|\b(why|how come|what happens|what if|explain)\b",
+    re.IGNORECASE,
+)
+
+_SKIPPED_QUESTION_NOTE = (
+    "This tool only writes the code for the step above -- it does not answer "
+    "conceptual or \"why\" questions, even when your note includes one. Use "
+    "ai.ask_conceptual_hint(...) for that."
+)
+
+
+def _looks_like_question(note: str) -> bool:
+    return bool(_QUESTION_RE.search(note))
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +183,13 @@ def assist(req: AssistRequest, authorization: str | None = Header(None)):
     if req.student_note:
         user_message += f"\n\nStudent's note (context only, not a new task): {req.student_note}"
     raw = _call_openai(system_prompt, user_message)
-    code, note = _split_trailing_note(raw)
+    # Still strip a NOTE line if the model added one anyway (belt and
+    # suspenders, same reasoning as the fence-stripping below) -- but
+    # whether to SHOW a note to the student is now decided by the server,
+    # not by whether the model remembered to add one.
+    code, _ = _split_trailing_note(raw)
     code = _strip_code_fence(code)
+    note = _SKIPPED_QUESTION_NOTE if req.student_note and _looks_like_question(req.student_note) else None
     store.log_exchange(
         record["token_hash"], record["student_label"], "assist",
         req.step, None, user_message, raw, MODEL,
