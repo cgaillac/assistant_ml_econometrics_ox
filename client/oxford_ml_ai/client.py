@@ -6,15 +6,32 @@ Usage in a notebook:
     import oxford_ml_ai as ai
     ai.configure(token="paste-your-token-here")   # or set OXFORD_AI_TOKEN env var
 
-    ai.ask_implementation_helper("2_split")
+    ai.list_steps()                       # see valid step IDs for the line below
+    ai.ask_implementation_helper("2_split")   # a code SKELETON, not a finished solution
     ai.ask_skeptical_reviewer("My interpretation is that ...")
-    ai.ask_premortem("I trained a KNN classifier on Iris and got 97% accuracy ...")
+    ai.ask_ai_student("I trained a KNN classifier and tuned k via GridSearchCV ...")
 
 There is deliberately no function that accepts a free-form system prompt or
 lets you pick the model -- every call goes to one of the fixed personas the
 instructor configured server-side.
+
+ask_implementation_helper() deliberately does NOT hand back finished,
+ready-to-run code: it fills in the scikit-learn structure (imports, the
+right function/class, variable names) but leaves every substantive choice
+-- a hyperparameter, a split fraction, a parameter grid -- as a `___`
+blank with a comment naming the decision. Running the skeleton as-is will
+raise a NameError at the first blank; that's expected, and is your cue to
+fill it in yourself rather than paste-and-run.
+
+Every ask_*() call returns an object that behaves like a plain string (or,
+for list_steps(), a plain dict) -- `code = ai.ask_implementation_helper(...)`
+works exactly as you'd expect -- but ALSO renders as nicely formatted
+Markdown/HTML when it's the last line of a notebook cell, instead of
+Jupyter's default "quoted string" auto-echo. That's what avoids the
+double-printed output some earlier versions had.
 """
 
+import html as _html
 import json
 import os
 from pathlib import Path
@@ -23,7 +40,7 @@ import requests
 
 _CONFIG_PATH = Path.home() / ".oxford_ml_ai" / "config.json"
 _DEFAULT_BASE_URL = os.environ.get(
-    "OXFORD_AI_BASE_URL", "https://oxford-ml-ai-companion.onrender.com/"
+    "OXFORD_AI_BASE_URL", "https://REPLACE-WITH-YOUR-DEPLOYED-URL.onrender.com"
 )
 
 _state = {
@@ -31,6 +48,7 @@ _state = {
     "base_url": _DEFAULT_BASE_URL,
     "reviewer_session_id": None,
     "hint_session_id": None,
+    "student_session_id": None,
 }
 
 
@@ -89,29 +107,104 @@ def _post(path: str, payload: dict) -> dict:
     return resp.json()
 
 
-def _display(markdown_text: str):
-    try:
-        from IPython.display import Markdown, display
+def _get(path: str) -> dict:
+    url = _state["base_url"].rstrip("/") + path
+    resp = requests.get(url, headers=_headers(), timeout=30)
+    if resp.status_code == 401:
+        raise RuntimeError("Access token rejected. Check ai.configure(token=...).")
+    resp.raise_for_status()
+    return resp.json()
 
-        display(Markdown(markdown_text))
-    except ImportError:
-        print(markdown_text)
+
+# ---------------------------------------------------------------------------
+# Rich-but-plain return values: behave as a normal str/dict, but carry a
+# nicer notebook rendering so a bare `ai.ask_x(...)` cell shows one clean
+# block instead of our own display PLUS Jupyter's separate raw-repr echo.
+# ---------------------------------------------------------------------------
+
+class _RichText(str):
+    def __new__(cls, value: str, markdown: str, html_body: str):
+        obj = super().__new__(cls, value)
+        obj._markdown = markdown
+        obj._html = html_body
+        return obj
+
+    def _repr_markdown_(self):
+        return self._markdown
+
+    def _repr_html_(self):
+        return self._html
+
+
+class _RichDict(dict):
+    def __new__(cls, value: dict, markdown: str, html_body: str):
+        obj = super().__new__(cls, value)
+        return obj
+
+    def __init__(self, value: dict, markdown: str, html_body: str):
+        super().__init__(value)
+        self._markdown = markdown
+        self._html = html_body
+
+    def _repr_markdown_(self):
+        return self._markdown
+
+    def _repr_html_(self):
+        return self._html
+
+
+def _code_block(header: str, code: str, note: str | None = None) -> _RichText:
+    md = f"**{header}**\n\n```python\n{code}\n```"
+    htm = f"<p><strong>{_html.escape(header)}</strong></p><pre><code>{_html.escape(code)}</code></pre>"
+    if note:
+        md += f"\n\n*Note: {note}*"
+        htm += f"<p><em>Note: {_html.escape(note)}</em></p>"
+    return _RichText(code, md, htm)
+
+
+def _text_block(header: str, body: str) -> _RichText:
+    md = f"**{header}**\n\n{body}"
+    htm = f"<p><strong>{_html.escape(header)}</strong></p><p>{_html.escape(body).replace(chr(10), '<br>')}</p>"
+    return _RichText(body, md, htm)
 
 
 # ---------------------------------------------------------------------------
 # Part A
 # ---------------------------------------------------------------------------
 
+def list_steps() -> dict:
+    """Valid step IDs for ask_implementation_helper, with a short label for
+    each. Metadata only -- doesn't call the AI, doesn't count against your
+    daily quota.
+    """
+    steps = _get("/v1/steps")
+    md_lines = "\n".join(f"- `{k}` -- {v}" for k, v in steps.items())
+    md = f"**Valid steps for `ai.ask_implementation_helper(...)`:**\n\n{md_lines}"
+    html_items = "".join(
+        f"<li><code>{_html.escape(k)}</code> -- {_html.escape(v)}</li>"
+        for k, v in steps.items()
+    )
+    htm = (
+        "<p><strong>Valid steps for ai.ask_implementation_helper(...)</strong></p>"
+        f"<ul>{html_items}</ul>"
+    )
+    return _RichDict(steps, md, htm)
+
+
 def ask_implementation_helper(step: str, note: str = "") -> str:
-    """Get the routine scikit-learn code for one specific, pre-approved
-    step of the exercise (e.g. "2_split", "3_logreg", "4_accuracy",
-    "5_knn_cv", "6_gridsearch", "7_confusion"). Will NOT answer the
-    conceptual/discussion question attached to that step -- that part is
-    yours to do.
+    """Get a scikit-learn CODE SKELETON for one specific, pre-approved step
+    of the exercise -- not a finished, ready-to-run solution. Structure and
+    function/variable names are filled in, but every substantive choice
+    (a hyperparameter, a split fraction, a parameter grid, ...) is left as
+    a `___` blank with a comment naming what you need to decide. Running
+    it unedited will raise a NameError at the first blank -- that's
+    expected, fill the blanks in yourself. Call list_steps() to see valid
+    step IDs. Will NOT answer the conceptual/discussion question attached
+    to that step -- that part is yours to do (use ask_conceptual_hint for
+    a nudge on it).
     """
     result = _post("/v1/assist", {"step": step, "student_note": note})
-    _display(f"**AI-generated code for `{step}`:**\n\n```python\n{result['code']}\n```")
-    return result["code"]
+    return _code_block(f"Code skeleton for `{step}` -- fill in the blanks:", result["code"], result.get("note"))
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +228,10 @@ def ask_conceptual_hint(question: str, your_thinking: str = "") -> str:
         {"message": message, "session_id": _state["hint_session_id"]},
     )
     _state["hint_session_id"] = result["session_id"]
-    header = f"**Hint ({result['exchange_number']}/3):**"
+    header = f"Hint ({result['exchange_number']}/3)"
     if result["is_final"]:
-        header += " _last hint for this question_"
-    _display(f"{header}\n\n{result['reply']}")
-    return result["reply"]
+        header += " -- last hint for this question"
+    return _text_block(header, result["reply"])
 
 
 def reset_hint_session():
@@ -161,11 +253,10 @@ def ask_skeptical_reviewer(message: str) -> str:
         {"message": message, "session_id": _state["reviewer_session_id"]},
     )
     _state["reviewer_session_id"] = result["session_id"]
-    header = f"**Skeptical Reviewer (exchange {result['exchange_number']}/5):**"
+    header = f"Skeptical Reviewer (exchange {result['exchange_number']}/5)"
     if result["is_final"]:
-        header += " _final -- summary below_"
-    _display(f"{header}\n\n{result['reply']}")
-    return result["reply"]
+        header += " -- final, summary below"
+    return _text_block(header, result["reply"])
 
 
 def reset_reviewer_session():
@@ -173,21 +264,37 @@ def reset_reviewer_session():
 
 
 # ---------------------------------------------------------------------------
-# Part B, Step 9
+# Part B, Step 9 -- AI-student (learning by teaching)
 # ---------------------------------------------------------------------------
 
-def ask_premortem(description: str) -> str:
-    """One-shot pre-mortem on your analysis. Describe what you did in a
-    couple of sentences; get back 2-3 concrete, specific failure modes.
+def ask_ai_student(message: str) -> str:
+    """Explain your analysis, in your own words, to an AI playing a
+    not-especially-strong, earnest student. It will ask ONE naive,
+    genuine clarifying question per turn about your explanation -- not an
+    expert critique (that's ask_skeptical_reviewer), just an honest "wait,
+    I don't follow that bit" from a novice. Explaining it well enough for
+    a beginner to follow is the point (the "learning by teaching" effect):
+    the questions that trip it up are usually exactly the parts of your
+    own understanding that are still shaky. Bounded at 3 exchanges
+    (server-enforced); the final exchange returns a short reflection
+    instead of another question. Call reset_ai_student_session() to start
+    over with a different explanation.
     """
-    result = _post("/v1/premortem", {"description": description})
-    _display(f"**Pre-mortem:**\n\n{result['reply']}")
-    return result["reply"]
+    result = _post(
+        "/v1/ai-student",
+        {"message": message, "session_id": _state["student_session_id"]},
+    )
+    _state["student_session_id"] = result["session_id"]
+    header = f"AI-student (exchange {result['exchange_number']}/3)"
+    if result["is_final"]:
+        header += " -- final reflection below"
+    return _text_block(header, result["reply"])
+
+
+def reset_ai_student_session():
+    _state["student_session_id"] = None
 
 
 def whoami() -> dict:
     """Check your usage against your daily limit."""
-    url = _state["base_url"].rstrip("/") + "/v1/whoami"
-    resp = requests.get(url, headers=_headers(), timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    return _get("/v1/whoami")

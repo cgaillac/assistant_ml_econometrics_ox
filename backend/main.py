@@ -311,26 +311,53 @@ def conceptual_hint(req: ConceptualHintRequest, authorization: str | None = Head
 
 
 # ---------------------------------------------------------------------------
-# Part B, Step 9: Pre-mortem (single turn)
+# Part B, Step 9: AI-student (learning by teaching, bounded multi-turn).
+# Replaces the earlier single-turn pre-mortem persona -- see prompts.py for
+# the rationale. Structurally identical to the Skeptical Reviewer/conceptual
+# hint endpoints: a session, a bounded exchange count, and real conversation
+# history replayed to the model each turn.
 # ---------------------------------------------------------------------------
 
-class PremortemRequest(BaseModel):
-    description: str
+class StudentRequest(BaseModel):
+    message: str
+    session_id: str | None = None
 
 
-class PremortemResponse(BaseModel):
+class StudentResponse(BaseModel):
+    session_id: str
     reply: str
+    exchange_number: int
+    is_final: bool
 
 
-@app.post("/v1/premortem", response_model=PremortemResponse)
-def premortem(req: PremortemRequest, authorization: str | None = Header(None)):
+@app.post("/v1/ai-student", response_model=StudentResponse)
+def ai_student(req: StudentRequest, authorization: str | None = Header(None)):
     record = _authenticate(authorization)
-    reply = _call_openai(prompts.PREMORTEM_SYSTEM_PROMPT, req.description)
-    store.log_exchange(
-        record["token_hash"], record["student_label"], "premortem",
-        None, None, req.description, reply, MODEL,
+    session_id, prior_turns = store.get_or_create_session(
+        req.session_id, "ai_student", record["token_hash"]
     )
-    return PremortemResponse(reply=reply)
+    exchange_number = prior_turns + 1
+    is_final = exchange_number >= prompts.STUDENT_MAX_EXCHANGES
+
+    system_prompt = prompts.STUDENT_SYSTEM_PROMPT
+    user_message = req.message
+    if is_final:
+        user_message += f"\n\n[SYSTEM NOTE: {prompts.STUDENT_FINAL_INSTRUCTION}]"
+
+    history = store.get_session_history(session_id)
+    reply = _call_openai(system_prompt, user_message, extra_messages=history)
+
+    store.increment_session_turn(session_id)
+    store.log_exchange(
+        record["token_hash"], record["student_label"], "ai_student",
+        None, session_id, req.message, reply, MODEL,
+    )
+    return StudentResponse(
+        session_id=session_id,
+        reply=reply,
+        exchange_number=exchange_number,
+        is_final=is_final,
+    )
 
 
 @app.get("/v1/whoami")
