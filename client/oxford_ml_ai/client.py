@@ -40,7 +40,7 @@ import requests
 
 _CONFIG_PATH = Path.home() / ".oxford_ml_ai" / "config.json"
 _DEFAULT_BASE_URL = os.environ.get(
-    "OXFORD_AI_BASE_URL", "https://REPLACE-WITH-YOUR-DEPLOYED-URL.onrender.com"
+    "OXFORD_AI_BASE_URL", "https://oxford-ml-ai-companion.onrender.com"
 )
 
 _state = {
