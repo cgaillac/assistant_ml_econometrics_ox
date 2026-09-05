@@ -464,197 +464,230 @@ PART_A_STEPS.update({
 })
 
 # ---------------------------------------------------------------------------
-# Fourth exercise: conformal inference (split conformal prediction, four
-# sub-problems following Kasy's exercise sheet -- continuous-outcome
-# regression via ridge, quantile regression via CQR, discrete classification
-# via penalized logistic regression, and via k-NN -- plus one extra
-# conceptual step, marginal vs. group-conditional coverage, drawn from the
-# reference tutorial notebook rather than the exercise sheet). `cf`-prefixed
-# step IDs, same convention as `sh`/`bd`.
+# Fourth exercise: conformal inference (split conformal prediction).
+# REVISED (round 12): this exercise's Part A steps were originally written
+# around a separate exercise-sheet PDF (Kasy's four numbered problems --
+# California Housing/ridge/CQR, then Wine/logistic-regression/k-NN). The
+# instructor has since asked for the questions to instead be based directly
+# on his own reference tutorial notebook, `conformal_prediction_4.ipynb`
+# ("Conformal Prediction -- Illustrated," following Angelopoulos & Bates
+# 2023) -- a richer, already-executed, non-AI-companion notebook covering
+# five sections: (1) a univariate warm-up contrasting the naive vs.
+# finite-sample-corrected calibration quantile; (2) constant-width
+# regression bands on a synthetic heteroskedastic DGP; (3) TWO adaptive
+# regression scores side by side (a studentized score AND CQR), not just
+# CQR alone; (4) classification prediction SETS on sklearn's digits
+# dataset, comparing TWO conformity scores (a simple 1-minus-probability
+# score and a RAPS-style score) on ONE classifier, rather than the same
+# score across two classifiers; (5) marginal vs. group-conditional
+# coverage on an exact two-group synthetic DGP. `cf`-prefixed step IDs are
+# kept (same topic, same deployment slot), but every step's content below
+# was rewritten to match the reference notebook rather than the old PDF --
+# California Housing, Wine, RidgeCV, penalized logistic regression, and
+# k-NN no longer appear anywhere in this exercise.
 #
 # The finite-sample calibration-quantile formula (ceiling correction,
 # k = ceil((1-alpha)*(n+1)), q_hat = k-th smallest calibration score) and
-# the three conformity-score formulas (|y-f(x)| for Problem 1; CQR's
-# max(t_lo(x)-y, y-t_hi(x)) for Problem 2; the RAPS-style cumulative-
-# probability score for Problems 3/4) are all given by the exercise, not a
-# student choice -- task text below says so explicitly, per rule 3 of the
-# delegation guardrail.
+# every conformity-score formula below (constant-width |y-f(x)|; the
+# studentized score's division by a fitted sigma_hat(x); CQR's
+# max(t_lo(x)-y, y-t_hi(x)); the two classification scores) are all given
+# by the reference notebook, not a student choice -- task text below says
+# so explicitly, per rule 3 of the delegation guardrail.
 #
-# NOTE on the exercise sheet's set definition: the PDF states
-# C(x) = {y : s(x,y) >= q_hat}, which is inconsistent with both (a) the
-# interval construction the same PDF describes two paragraphs later,
-# [f_hat(x)-q_hat, f_hat(x)+q_hat], and (b) a direct numerical check (see
-# Step 1 below): calibrating on |Y| ~ |N(0,1)| and checking coverage under
-# each direction over 4000 Monte Carlo repetitions gives empirical coverage
-# 0.899 for s(x,y) <= q_hat against a 0.90 target, and 0.101 (the
-# complement) for s(x,y) >= q_hat. The PDF's ">=" is a typo; "<=" is what
-# every step below implements. Step 1 has the student re-derive this for
-# themselves rather than silently handing them the corrected formula.
+# Unlike the exercise this replaces, there is no source-material typo to
+# resolve here (the reference notebook's own Section 6 summary states the
+# set definition correctly, C(x) = {y : s(x,y) <= q_hat}, throughout) --
+# Step 1's hand-typed exercise instead reproduces the reference notebook's
+# OWN pedagogical device: showing the NAIVE quantile (no +1 correction)
+# under-covers at small calibration sizes while the corrected one doesn't,
+# not resolving an inequality-direction ambiguity.
 #
-# Datasets: Problems 1-2 use sklearn's California Housing (regression,
-# continuous outcome, 8 features); Problems 3-4 use sklearn's Wine dataset
-# (classification, 3 classes, 13 features, 178 rows total) rather than the
-# reference notebook's digits dataset, to match the exercise sheet. Wine is
-# small and close to linearly separable, so calibration scores cluster near
-# 0, the achievable quantile levels are coarse, and conformal sets tend to
-# OVER-cover (verified: logistic-regression coverage of 1.00 against a 0.90
-# target with a 44-point calibration set, vs. the reference notebook's much
-# larger digits calibration set landing close to nominal) -- this is a
-# genuine, worth-discussing consequence of small-n calibration and
-# near-separability, not a bug, and Step cf5/cf6's task text below asks the
-# student to notice and discuss it rather than treating an over-covering
-# result as suspicious.
+# GROUND TRUTH: this is the second exercise in this project (after NLP,
+# round 10) built from the instructor's own already-executed reference
+# notebook rather than independently re-derived from scratch in this
+# session -- the same practice applies. Every number quoted in the task
+# text and the generated notebook below (coverage/width/set-size figures)
+# is copied verbatim from `conformal_prediction_4.ipynb`'s real, already-
+# executed cell outputs, not re-simulated here. Two real findings from
+# those executed outputs are worth knowing if you touch this again: (1)
+# Problem 3's own real run shows CQR achieving LOWER test coverage (0.886)
+# than the studentized score (0.914) and even than the plain constant-
+# width band (0.916) against the same 0.90 target, despite CQR and the
+# studentized score having near-identical average width (3.55 vs 3.52) --
+# i.e. "more adaptive" and "better width" did not translate into "better
+# coverage" on this one split, a useful anti-just-so-story finding built
+# into Step 3's task text and the Skeptical Reviewer's third dimension
+# below. (2) Problem 4's simple (1-p) score achieves coverage NOTICEABLY
+# BELOW the 90% target (0.8867) with a mean prediction-SET size under 1
+# (0.889) -- meaning some test points get an EMPTY set under this score,
+# which by construction cannot cover -- while RAPS overshoots to 0.92
+# coverage with a much larger mean set size (3.609); this asymmetry (one
+# score under-covers with small, sometimes-empty sets, the other
+# over-covers with large sets) is built into Step 4's task text and its
+# hand-verification/discussion step, and into the Skeptical Reviewer's
+# first dimension below, rather than presented as an obviously "correct"
+# score to prefer.
 # ---------------------------------------------------------------------------
 
 PART_A_STEPS.update({
-    "cf2_ridge_pipeline": {
-        "label": "Conformal Step 2 -- ridge regression + constant-width conformal interval (Problem 1)",
+    "cf2_constant_bands": {
+        "label": "Conformal Step 2 -- constant-width bands on a synthetic heteroskedastic DGP",
         "task": (
-            "Write code implementing Problem 1 end to end. (1) Load the "
-            "California Housing data via "
-            "sklearn.datasets.fetch_california_housing(), giving arrays X "
-            "(8 features) and y (median house value). (2) Split into "
-            "training (60%), calibration (20%), and test (20%) sets -- "
-            "these fractions are given by the exercise, write them in "
-            "directly (e.g. two calls to train_test_split, or one "
-            "shuffled-index partition) -- and use a fixed random_state so "
-            "the split is reproducible. (3) Fit "
-            "sklearn.linear_model.RidgeCV on the training set only, "
-            "supplying an alphas grid and a cv fold count for it to search "
-            "over -- both are free choices, leave them as blanks. (4) "
-            "Using the fitted model, compute the conformity score "
-            "s(x,y) = |y - f_hat(x)| for every point in the calibration "
-            "set (never the test set). (5) Compute the calibration "
-            "quantile q_hat using the ceiling-corrected formula from Step "
-            "1: with n = calibration-set size, k = "
-            "ceil((1-alpha)*(n+1)) capped at n, q_hat = the k-th smallest "
-            "calibration score (np.sort(scores)[k-1], 0-indexed) -- this "
-            "formula is given, write it in directly, do not leave it "
-            "blank. (6) Construct the prediction interval for every test "
-            "point as [f_hat(x) - q_hat, f_hat(x) + q_hat], using "
-            "whichever of <=/>= you determined in Step 1 defines "
-            "membership in the set -- do not silently follow the exercise "
-            "sheet's literal '>=' wording without re-justifying it here. "
-            "(7) Evaluate and print: empirical coverage on the test set "
-            "(fraction of points with y inside its interval) and the "
-            "average interval width. (8) Plot the prediction intervals "
-            "(e.g. errorbar or fill_between) against the true y values for "
-            "a subsample of ~60-100 test points, sorted by predicted "
-            "value, marking covered vs. missed points differently."
+            "Write code implementing the reference notebook's Section 2 "
+            "end to end. (1) Generate synthetic data: draw N=2000 points "
+            "X ~ Uniform(0, 2*pi), and Y = sin(X) + 0.3*X*epsilon with "
+            "epsilon ~ N(0,1) -- this DGP is given by the reference "
+            "notebook, write it in directly; note that the noise "
+            "variance grows with X (heteroskedastic), which matters for "
+            "later steps. (2) Split into training (50%), calibration "
+            "(25%), and test (25%) sets -- these fractions are given, "
+            "write them in directly; use a fixed random seed so the "
+            "split is reproducible. (3) Fit a "
+            "sklearn.ensemble.GradientBoostingRegressor on the training "
+            "set only; n_estimators, max_depth, and learning_rate ARE "
+            "free choices -- leave them as blanks. (4) Using the fitted "
+            "model, compute the conformity score s(x,y) = |y - f_hat(x)| "
+            "for every point in the calibration set (never the test "
+            "set). (5) Compute the calibration quantile q_hat using the "
+            "ceiling-corrected formula from Step 1: with n = "
+            "calibration-set size, k = ceil((1-alpha)*(n+1)) capped at "
+            "n, q_hat = the k-th smallest calibration score -- this "
+            "formula is given, write it in directly. (6) Construct the "
+            "prediction interval for every test point as [f_hat(x) - "
+            "q_hat, f_hat(x) + q_hat]. (7) Evaluate and print: empirical "
+            "coverage on the test set and the average interval width "
+            "(note it is EXACTLY 2*q_hat for every point, by "
+            "construction -- this is the 'constant-width' property the "
+            "next step is designed to improve on). (8) Plot the test "
+            "points (colored by whether they were covered or missed), "
+            "the fitted f_hat(x) curve, the true sin(x) curve, and the "
+            "shaded prediction band, all against x on one figure."
         ),
     },
-    "cf4_cqr_pipeline": {
-        "label": "Conformal Step 4 -- conformalized quantile regression (Problem 2)",
+    "cf3_adaptive_bands": {
+        "label": "Conformal Step 3 -- adaptive bands: studentized score AND CQR",
         "task": (
-            "Write code implementing Problem 2 end to end, reusing the "
-            "SAME train/calibration/test split and California Housing "
-            "data as Step cf2 (Problem 1), so the two methods are compared "
-            "on identical data. (1) Fit two separate quantile-regression "
-            "models on the training set with "
-            "sklearn.linear_model.QuantileRegressor: one for tau_lo = "
-            "alpha/2 and one for tau_hi = 1 - alpha/2 -- with alpha=0.10 "
-            "as in Step cf2, these are 0.05 and 0.95, write them in "
-            "directly since they follow from alpha, not a free choice. "
-            "Wrap each in a Pipeline(StandardScaler(), "
-            "QuantileRegressor(quantile=..., solver='highs')); "
-            "QuantileRegressor's own regularization strength (its alpha "
-            "argument) IS a free choice -- leave it blank. (2) On the "
-            "calibration set, compute the CQR conformity score "
-            "s(x,y) = max(t_lo(x) - y, y - t_hi(x)), where t_lo, t_hi are "
-            "the two models' predictions -- this formula is given, write "
-            "it in directly. (3) Compute q_hat with the SAME "
-            "ceiling-corrected quantile formula as Step cf2/Step 1. (4) "
-            "Construct the adaptive interval for every test point as "
-            "[t_lo(x) - q_hat, t_hi(x) + q_hat]. (5) Evaluate empirical "
-            "coverage and average width on the test set, and print/"
-            "tabulate both side by side with Step cf2's ridge/"
-            "constant-width coverage and width. (6) Produce a 'width by "
-            "region' plot: bin test points by one feature of your choice "
-            "(e.g. MedInc) and plot the mean interval width per bin for "
-            "BOTH methods (Step cf2's constant-width and this step's CQR) "
-            "on the same axes, to show whether CQR actually adapts its "
-            "width to that feature."
+            "Write code implementing the reference notebook's Section 3 "
+            "end to end, reusing the SAME train/calibration/test split "
+            "and the SAME fitted GradientBoostingRegressor from Step 2 "
+            "(f_hat), so all three methods in this step are compared on "
+            "identical data. PART A -- studentized score: (1) on the "
+            "TRAINING set, compute the absolute residuals "
+            "|Y_train - f_hat(X_train)| and fit a SECOND "
+            "GradientBoostingRegressor, sigma_model, to predict these "
+            "residuals from X_train (this estimates sigma_hat(x), the "
+            "local scale of the noise) -- sigma_model's own "
+            "hyperparameters are free choices, leave them blank. (2) On "
+            "the calibration set, compute sigma_hat(x) = "
+            "max(sigma_model.predict(x), 1e-6) (the floor avoids "
+            "division by ~0) and the studentized score s(x,y) = "
+            "|y - f_hat(x)| / sigma_hat(x) -- this formula is given, "
+            "write it in directly. (3) Compute q_hat with the same "
+            "ceiling-corrected formula as Step 2/Step 1, then construct "
+            "the interval [f_hat(x) - sigma_hat(x)*q_hat, f_hat(x) + "
+            "sigma_hat(x)*q_hat] for every test point -- note the "
+            "width now varies with x through sigma_hat(x). PART B -- "
+            "CQR: (4) fit two sklearn.linear_model.QuantileRegressor "
+            "models (each wrapped in a Pipeline with StandardScaler) on "
+            "the training set, for tau_lo = alpha/2 and tau_hi = "
+            "1 - alpha/2 (with alpha=0.10 as in Step 2, these are 0.05 "
+            "and 0.95 -- write them in directly, they follow from "
+            "alpha); QuantileRegressor's own regularization strength "
+            "(its alpha argument) IS a free choice, leave it blank. (5) "
+            "On the calibration set, compute the CQR conformity score "
+            "s(x,y) = max(t_lo(x) - y, y - t_hi(x)) -- this formula is "
+            "given, write it in directly. (6) Compute q_hat with the "
+            "same formula and construct the interval [t_lo(x) - q_hat, "
+            "t_hi(x) + q_hat] for every test point. FINALLY: (7) "
+            "print/tabulate coverage and mean width for all THREE "
+            "methods side by side (Step 2's constant-width, this step's "
+            "studentized, and this step's CQR). (8) Produce a "
+            "three-panel figure (one subplot per method) showing the "
+            "test points (covered vs. missed), the band, and the true "
+            "sin(x) curve, plus a separate 'width by region' line plot: "
+            "bin test points into >=6 bins of x and plot each method's "
+            "mean interval width per bin on the same axes, to show "
+            "whether the two adaptive methods actually widen where the "
+            "true noise variance is higher (large x)."
         ),
     },
-    "cf5_logistic_raps": {
-        "label": "Conformal Step 5 -- penalized logistic regression + RAPS-style sets (Problem 3)",
+    "cf4_digit_sets": {
+        "label": "Conformal Step 4 -- classification prediction sets on digits: simple vs. RAPS scores",
         "task": (
-            "Write code implementing Problem 3 end to end. (1) Load "
-            "sklearn.datasets.load_wine() (3 classes, 178 rows). (2) "
-            "Split into training, calibration, and test sets with "
-            "train_test_split(..., stratify=y) so all three classes "
-            "appear in every split -- choose the split fractions yourself "
-            "(the exercise doesn't fix these the way Problem 1 does). (3) "
-            "Fit a Pipeline(StandardScaler(), LogisticRegression(penalty="
-            "___, max_iter=___)) on the training set, selecting the "
-            "penalty strength C by cross-validation (GridSearchCV or "
-            "LogisticRegressionCV) minimizing classification error -- "
-            "choose 'l1' or 'l2' and the C grid yourself. (4) On the "
-            "calibration set, compute the conformity score s(x,y) = the "
-            "sum, over every class y' with predicted probability "
-            "f_hat(y'|x) >= f_hat(y|x), of f_hat(y'|x) -- i.e. for the "
-            "true label y, sum the predicted probabilities of every class "
-            "(including y itself) that is at least as likely as y under "
-            "the fitted model. This formula is given, write it in "
-            "directly -- do not add the RAPS paper's tie-breaking "
-            "uniform-randomization term unless you want to implement that "
-            "as your own extension. (5) Compute q_hat with the same "
-            "ceiling-corrected quantile formula as Step 1. (6) For every "
-            "test point and EVERY candidate class y', compute the same "
-            "score s(x,y') and include y' in the prediction set if "
-            "s(x,y') <= q_hat (use whichever direction you established in "
-            "Step 1). (7) Evaluate and print: overall empirical coverage, "
-            "average prediction-set size, and per-true-class ('condi"
-            "tional') coverage for each of the 3 classes separately, not "
-            "just the overall number. (8) Visualize: a bar chart of the "
-            "distribution of set sizes, and a bar chart of per-class "
-            "coverage against the target 1-alpha line."
+            "Write code implementing the reference notebook's Section 4 "
+            "end to end. (1) Load sklearn.datasets.load_digits() (10 "
+            "classes, 8x8 pixel images) and rescale pixel values to "
+            "[0,1] by dividing by 16.0. (2) Split into training (50%), "
+            "calibration (25%), and test (25%) sets with "
+            "train_test_split(..., stratify=y) at each split (two calls "
+            "chained, as in Step 2), so all 10 classes appear in every "
+            "split. (3) Fit a SINGLE "
+            "sklearn.ensemble.RandomForestClassifier on the training "
+            "set (n_estimators is a free choice, leave it blank) and "
+            "get its predicted class probabilities on the calibration "
+            "and test sets. (4) Implement TWO conformity score "
+            "functions, both taking predicted-probability arrays and "
+            "true labels: simple_score(probs, labels) = 1 - "
+            "probs[i, labels[i]] for each point i (one minus the "
+            "predicted probability of the true class); and "
+            "raps_score(probs, labels) = for each point i, the sum of "
+            "probs[i, y'] over every class y' whose predicted "
+            "probability is >= the true class's predicted probability "
+            "(the RAPS/cumulative-probability score). Both formulas are "
+            "given, write them in directly -- do not add the RAPS "
+            "paper's tie-breaking randomization term. (5) For EACH "
+            "score, separately: calibrate q_hat on the calibration set "
+            "with the usual ceiling-corrected formula; build the "
+            "prediction set for every test point as every candidate "
+            "class y' whose score against that point is <= q_hat (note "
+            "a test point can end up with an EMPTY set if no class "
+            "passes the threshold -- do not special-case this away, it "
+            "is a real, meaningful possibility discussed below); and "
+            "evaluate overall coverage and mean set size. (6) Print "
+            "both scores' coverage and mean set size side by side. (7) "
+            "Plot, for both scores, a bar chart of the distribution of "
+            "prediction-set sizes (0 through 10). (8) Compute and plot "
+            "per-true-class conditional coverage for BOTH scores on one "
+            "figure (grouped bars, one pair per digit class, with a "
+            "reference line at the target 1-alpha). (9) Show a small "
+            "grid of example digit images: some where the RAPS "
+            "prediction set has size 1 ('easy') and some where it has "
+            "size >= 3 ('ambiguous'), titling each with its true label "
+            "and its RAPS prediction set, colored green if the true "
+            "label is in the set and red if not."
         ),
     },
-    "cf6_knn_raps": {
-        "label": "Conformal Step 6 -- k-NN + RAPS-style sets, compared to logistic regression (Problem 4)",
+    "cf5_group_coverage": {
+        "label": "Conformal Step 5 -- marginal vs. group-conditional coverage (Monte Carlo demonstration)",
         "task": (
-            "Write code implementing Problem 4: repeat Step cf5's ENTIRE "
-            "pipeline (same Wine dataset, same train/calibration/test "
-            "split, same RAPS-style conformity score and set-construction "
-            "rule, same evaluation) but replace the classifier with "
-            "Pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors="
-            "___)), selecting n_neighbors by cross-validation "
-            "(GridSearchCV) instead of a penalty strength -- the "
-            "n_neighbors grid is a free choice, leave it blank. Print or "
-            "tabulate, side by side, Step cf5's (logistic regression) and "
-            "this step's (k-NN) overall coverage, average set size, and "
-            "per-class conditional coverage, so the two classifiers can be "
-            "directly compared on identical data."
-        ),
-    },
-    "cf7_group_coverage": {
-        "label": "Conformal Step 7 -- marginal vs. group-conditional coverage (Monte Carlo demonstration)",
-        "task": (
-            "Write code for a small Monte Carlo demonstration of marginal "
-            "vs. group-conditional coverage, using SYNTHETIC data (not "
-            "California Housing or Wine, so the pattern is unambiguous). "
-            "Write a function gen_data(n, rng) that draws a group "
-            "indicator g in {0,1} (e.g. rng.binomial(1, 0.5, size=n)), a "
-            "covariate x whose distribution may also depend on g, and an "
-            "outcome y = x + sigma_g * noise where sigma_g differs by "
-            "group (a smaller sigma for group 0, a larger sigma for group "
-            "1) -- choose the exact group means/variances yourself, they "
-            "only need to differ enough to matter. Generate a training "
-            "set, a calibration set, and a test set this way; fit a "
-            "single LinearRegression on the pooled training set (ignoring "
-            "group membership, as if it weren't observed by the model). "
-            "Then compute TWO different prediction intervals for every "
-            "test point, both using Step 1's ceiling-corrected quantile "
-            "formula: (a) 'pooled' -- one q_hat computed on the WHOLE "
-            "calibration set, applied to every test point regardless of "
-            "group; (b) 'group-conditional' -- a SEPARATE q_hat_g computed "
-            "using only the calibration points in group g, applied only "
-            "to test points in that same group. Evaluate and print, for "
+            "Write code implementing the reference notebook's Section 5 "
+            "end to end, using its EXACT two-group synthetic DGP (given "
+            "by the reference notebook, not a free choice -- write it "
+            "in directly): a function gen_data(n, rng) that draws a "
+            "group indicator g ~ Bernoulli(0.5), a covariate x ~ "
+            "N(3*g, 1) (so group 0 is centered at 0 and group 1 at 3), "
+            "and an outcome y = x + noise, where noise ~ N(0, "
+            "sigma_g^2) with sigma_0 = 0.5 and sigma_1 = 2.0 -- group 1 "
+            "has 4x more noise than group 0. Generate a training set "
+            "(n=1000), a calibration set (n=500), and a test set "
+            "(n=2000) this way; fit a single sklearn.linear_model."
+            "LinearRegression on the pooled training set (ignoring "
+            "group membership, as if it weren't observed by the "
+            "model). Then compute TWO different prediction intervals "
+            "for every test point, both using the ceiling-corrected "
+            "quantile formula from Step 1: (a) 'constant-width'/pooled "
+            "-- one q_hat computed on the WHOLE calibration set, "
+            "applied to every test point regardless of group; (b) "
+            "'group-conditional' -- a SEPARATE q_hat_g computed using "
+            "only the calibration points in group g, applied only to "
+            "test points in that same group. Evaluate and print, for "
             "BOTH approaches: overall coverage, and coverage broken out "
-            "by group -- the point of the comparison is whether an "
-            "overall ~90% figure can hide systematic over-coverage in one "
-            "group and under-coverage in the other."
+            "by group. Finally, plot a two-panel figure: one panel per "
+            "approach, each showing the test points (colored by "
+            "covered/missed), the fitted regression line, and the "
+            "shaded band (constant width in the left panel, wider for "
+            "group 1 than group 0 in the right panel), with each "
+            "group's realized coverage annotated on the plot."
         ),
     },
 })
@@ -1397,57 +1430,72 @@ SKEPTICAL_REVIEWER_BANDITS_SYSTEM_PROMPT = (
     "three dimensions."
 )
 
-# Fourth exercise's Skeptical Reviewer: conformal inference. Same template
-# again. The three dimensions here are: whether the reported coverage
-# numbers are trustworthy given how small some of the calibration sets are
-# (Wine's calibration split in particular); whether an overall/marginal
+# Fourth exercise's Skeptical Reviewer: conformal inference. REVISED (round
+# 12) to match the exercise's new conformal_prediction_4-based content. The
+# three dimensions here: whether a score that produces smaller/emptier
+# prediction sets is actually still meeting its coverage target, or is
+# quietly trading coverage away for a smaller-looking set (built directly
+# from the reference notebook's own executed finding: the simple score's
+# mean set size is under 1 -- some test points get an EMPTY set -- and its
+# coverage, 0.887, comes in visibly below the 0.90 target, while RAPS
+# overshoots to 0.92 with much larger sets); whether an overall/marginal
 # coverage number is masking systematic under- or over-coverage in some
-# region or class (the exercise's own Step 7 -- and Step cf5/cf6's
-# per-class breakdown -- exist specifically so students can check this
-# rather than just quote the marginal figure); and whether an observed gap
-# between two methods (constant-width vs. CQR; logistic regression vs.
-# k-NN) is a real property of the two approaches or an artifact of one
-# particular calibration/test split, dataset size, or of comparing average
-# width/set-size without checking whether that average is doing real work
-# (e.g. CQR only "wins" on average because of a few extreme points).
+# region of X or some digit class (Step 5's group-conditional comparison,
+# and Step 4's per-class breakdown, exist specifically so students can
+# check this rather than just quote the marginal figure); and whether an
+# observed gap between methods is a real, systematic property or an
+# artifact of one split (built from the reference notebook's own finding
+# that CQR achieved the LOWEST coverage, 0.886, of all three regression
+# methods on its one executed run, despite having about the same average
+# width as the studentized score, 3.55 vs. 3.52 -- "more adaptive" and
+# "similar width" did not mean "better coverage" here).
 
 SKEPTICAL_REVIEWER_CONFORMAL_SYSTEM_PROMPT = (
     "You are a skeptical applied statistician reviewing a student's "
     "interpretation of split conformal prediction results: prediction "
-    "intervals for a continuous outcome (California Housing, comparing a "
-    "constant-width ridge-based interval against conformalized quantile "
-    "regression, CQR) and prediction sets for a discrete outcome (Wine, "
-    "comparing a RAPS-style conformity score under penalized logistic "
-    "regression and under k-NN). Your role is to challenge the student's "
-    "reasoning by asking probing questions about:\n"
-    "1. CALIBRATION-SAMPLE VALIDITY: the calibration sets here are "
-    "modest, especially for Wine (roughly a few dozen points per split) "
-    "-- press on whether the reported coverage numbers should be taken at "
-    "face value given how coarse the achievable quantile levels are with "
-    "so few calibration points, whether the student checked sensitivity "
-    "to the calibration/test split or random seed, and whether an "
-    "over-covering result (e.g. 100% coverage against a 90% target) was "
-    "correctly read as 'the guarantee held, conservatively' rather than "
-    "'the method worked especially well'.\n"
+    "intervals for a continuous outcome (a synthetic heteroskedastic "
+    "regression problem, comparing a constant-width band, a studentized-"
+    "score band, and conformalized quantile regression, CQR) and "
+    "prediction SETS for a discrete outcome (digits, comparing a simple "
+    "1-minus-probability conformity score against a RAPS-style score, "
+    "both under the same random forest classifier), plus a synthetic "
+    "two-group demonstration of marginal vs. group-conditional coverage. "
+    "Your role is to challenge the student's reasoning by asking probing "
+    "questions about:\n"
+    "1. WHAT A SMALLER SET OR NARROWER INTERVAL ACTUALLY COSTS: the "
+    "simple classification score tends to produce smaller prediction "
+    "sets than RAPS -- some test points can even get an EMPTY set, which "
+    "by construction cannot contain the true label -- while its overall "
+    "coverage comes in visibly below the target rate, whereas RAPS "
+    "overshoots the target with much larger sets. Press on whether the "
+    "student is treating 'smaller/more efficient sets' as an unqualified "
+    "win, or checking whether the score that produced them is actually "
+    "still meeting its coverage guarantee -- and, if they used the "
+    "studentized or CQR score in the regression setting, whether a "
+    "narrower average interval there was checked against its own "
+    "realized coverage the same way.\n"
     "2. MARGINAL VS. CONDITIONAL COVERAGE: split conformal only guarantees "
     "coverage marginally, averaged over the whole test distribution -- "
     "press on whether the student's headline coverage number could be "
-    "hiding systematic under-coverage in some region of X (for the "
-    "regression problems) or some class (for the classification "
-    "problems), whether they actually looked at the per-class or "
-    "per-region breakdown rather than only the overall figure, and how "
-    "the pooled-vs-group-conditional calibration comparison (if they ran "
-    "it) bears on this.\n"
-    "3. COMPARISON VALIDITY BETWEEN METHODS: for whatever difference the "
-    "student reports between the two regression methods (constant-width "
-    "vs. CQR) or the two classification methods (logistic regression vs. "
-    "k-NN) -- e.g. one method having narrower average width or smaller "
-    "average set size -- press on whether that is a real, systematic "
-    "property of the method, or could instead be an artifact of this "
-    "particular calibration/test split, of comparing an AVERAGE width or "
-    "set size without checking whether it varies a lot across points, or "
-    "of one method simply fitting this particular dataset better by "
-    "chance -- how would the student rule these out?\n\n"
+    "hiding systematic under-coverage in some region of X (the "
+    "regression problem's heteroskedastic design means the true "
+    "difficulty varies a lot across x) or some digit class, whether they "
+    "actually looked at the per-region or per-class breakdown rather "
+    "than only the overall figure, and how the pooled-vs-group-"
+    "conditional comparison (if they ran it) bears on this -- in "
+    "particular, does a marginal coverage number close to 90% overall "
+    "still leave one group badly under-covered underneath it?\n"
+    "3. COMPARISON VALIDITY BETWEEN METHODS: for whatever ranking the "
+    "student reports among the three regression methods, or between the "
+    "two classification scores -- press on whether that ranking is a "
+    "real, systematic property of the methods, or could instead be an "
+    "artifact of this one particular calibration/test split, of judging "
+    "a method by its AVERAGE width or set size without checking its "
+    "actual realized coverage alongside it, or of a more 'adaptive'-"
+    "looking method not actually achieving better coverage than a "
+    "simpler one on this run -- how would the student rule these out, "
+    "and would they expect the ranking to hold on a different random "
+    "split?\n\n"
     "Be Socratic: ask leading questions, do not give direct answers. Keep "
     "responses concise (2-4 sentences). Acknowledge good points. Do not "
     "drift into other topics, code, or unrelated advice -- stay on these "
