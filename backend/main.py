@@ -218,6 +218,12 @@ def list_steps(authorization: str | None = Header(None)):
 class ReviewerRequest(BaseModel):
     message: str
     session_id: str | None = None
+    # Which instructor-authored Skeptical Reviewer persona to use -- this
+    # deployment can serve more than one exercise (see prompts.py), each
+    # with its own fixed set of challenge dimensions. Still not a free-form
+    # system prompt: `topic` only selects among prompts.SKEPTICAL_REVIEWER_
+    # PROMPTS, which the instructor wrote; anything else is rejected below.
+    topic: str = "classification"
 
 
 class ReviewerResponse(BaseModel):
@@ -230,13 +236,23 @@ class ReviewerResponse(BaseModel):
 @app.post("/v1/skeptical-reviewer", response_model=ReviewerResponse)
 def skeptical_reviewer(req: ReviewerRequest, authorization: str | None = Header(None)):
     record = _authenticate(authorization)
+    system_prompt = prompts.SKEPTICAL_REVIEWER_PROMPTS.get(req.topic)
+    if system_prompt is None:
+        raise HTTPException(
+            404,
+            f"Unknown topic '{req.topic}'. Valid topics: "
+            f"{', '.join(prompts.SKEPTICAL_REVIEWER_PROMPTS)}.",
+        )
+    # Namespaced by topic so a student's classification-exercise reviewer
+    # conversation and shrinkage-exercise reviewer conversation never share
+    # history or an exchange count, even if both are in progress at once.
+    session_type = f"skeptical_reviewer:{req.topic}"
     session_id, prior_turns = store.get_or_create_session(
-        req.session_id, "skeptical_reviewer", record["token_hash"]
+        req.session_id, session_type, record["token_hash"]
     )
     exchange_number = prior_turns + 1
     is_final = exchange_number >= prompts.SKEPTICAL_REVIEWER_MAX_EXCHANGES
 
-    system_prompt = prompts.SKEPTICAL_REVIEWER_SYSTEM_PROMPT
     user_message = req.message
     if is_final:
         user_message += f"\n\n[SYSTEM NOTE: {prompts.SKEPTICAL_REVIEWER_SUMMARY_INSTRUCTION}]"
@@ -252,7 +268,7 @@ def skeptical_reviewer(req: ReviewerRequest, authorization: str | None = Header(
     store.increment_session_turn(session_id)
     store.log_exchange(
         record["token_hash"], record["student_label"], "skeptical_reviewer",
-        None, session_id, req.message, reply, MODEL,
+        req.topic, session_id, req.message, reply, MODEL,
     )
     return ReviewerResponse(
         session_id=session_id,

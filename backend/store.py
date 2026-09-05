@@ -163,14 +163,22 @@ def log_exchange(
 
 
 def get_or_create_session(session_id: str | None, persona: str, token_hash: str) -> tuple[str, int]:
-    """Returns (session_id, current_turn_count_before_this_exchange)."""
+    """Returns (session_id, current_turn_count_before_this_exchange).
+
+    If session_id is given but belongs to a DIFFERENT persona (e.g. a
+    client bug, or state left over from a different exercise/topic that
+    happens to share a persona name prefix), a fresh session is created
+    instead of silently replaying that other persona's history and turn
+    count into this conversation -- self-healing rather than erroring out,
+    since a student mid-exercise has no good way to act on a 401/500 here.
+    """
     with _conn() as conn:
         if session_id:
             row = conn.execute(
                 "SELECT * FROM sessions WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
-            if row:
+            if row and row["persona"] == persona:
                 return session_id, row["turn_count"]
         new_id = str(uuid.uuid4())
         conn.execute(

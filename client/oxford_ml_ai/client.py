@@ -46,7 +46,12 @@ _DEFAULT_BASE_URL = os.environ.get(
 _state = {
     "token": os.environ.get("OXFORD_AI_TOKEN"),
     "base_url": _DEFAULT_BASE_URL,
-    "reviewer_session_id": None,
+    # Keyed by `topic`, since a deployment can serve more than one exercise
+    # (e.g. "classification" and "shrinkage") and each keeps its own
+    # Skeptical Reviewer conversation, exchange count, and persona --
+    # mixing them would carry the wrong conversation history into a fresh
+    # topic's exchange-1 question. See ask_skeptical_reviewer().
+    "reviewer_session_ids": {},
     "hint_session_id": None,
     "student_session_id": None,
 }
@@ -242,25 +247,33 @@ def reset_hint_session():
 # Part B, Step 8
 # ---------------------------------------------------------------------------
 
-def ask_skeptical_reviewer(message: str) -> str:
+def ask_skeptical_reviewer(message: str, topic: str = "classification") -> str:
     """Send one message to the Skeptical Reviewer. The conversation is
     capped at 5 exchanges (server-enforced); the final exchange returns a
     structured summary instead of another question. Call
     reset_reviewer_session() to start a fresh conversation.
+
+    `topic` selects which of the instructor's fixed Skeptical Reviewer
+    prompts to use, if this course deployment serves more than one
+    exercise -- e.g. "classification" (the fishing-mode/Iris exercise's
+    default) or "shrinkage" (the shrinkage-estimation exercise). Each
+    topic keeps its own conversation and exchange count; you don't need
+    to pass this unless your exercise's instructions tell you to.
     """
+    session_id = _state["reviewer_session_ids"].get(topic)
     result = _post(
         "/v1/skeptical-reviewer",
-        {"message": message, "session_id": _state["reviewer_session_id"]},
+        {"message": message, "session_id": session_id, "topic": topic},
     )
-    _state["reviewer_session_id"] = result["session_id"]
+    _state["reviewer_session_ids"][topic] = result["session_id"]
     header = f"Skeptical Reviewer (exchange {result['exchange_number']}/5)"
     if result["is_final"]:
         header += " -- final, summary below"
     return _text_block(header, result["reply"])
 
 
-def reset_reviewer_session():
-    _state["reviewer_session_id"] = None
+def reset_reviewer_session(topic: str = "classification"):
+    _state["reviewer_session_ids"].pop(topic, None)
 
 
 # ---------------------------------------------------------------------------
