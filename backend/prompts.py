@@ -42,9 +42,11 @@ Edit the text here to match your own course; nothing else needs to change.
 # ---------------------------------------------------------------------------
 
 _DELEGATION_GUARDRAIL = (
-    "You are a coding assistant for a PhD-level Foundations of Machine "
-    "Learning exercise (economics students). For the step described below, "
-    "you produce a CODE SKELETON, not a finished, directly-runnable "
+    "You are a coding assistant for a PhD-level graduate machine-learning "
+    "exercise for economics students (this prompt is shared across every "
+    "course and topic that uses this companion -- the step description "
+    "below is what tells you which one you're helping with). For the step "
+    "described below, you produce a CODE SKELETON, not a finished, directly-runnable "
     "solution, and not a near-solution with only a couple of numbers "
     "missing. The point is that the student still has to think through "
     "and WRITE every substantive modeling choice and every substantive "
@@ -1365,6 +1367,616 @@ PART_A_STEPS.update({
 })
 
 # ---------------------------------------------------------------------------
+# NEW COURSE: "Machine Learning for Economics" (Spring 2026, Christophe
+# Gaillac) -- a second course served by the same backend/client alongside
+# the original Foundations of Machine Learning course above. Nothing about
+# the architecture changes for a second course, same as it didn't for the
+# 2nd-6th topic within the first course: a step id is just a dict key, and
+# `assist()` doesn't care which course or topic it belongs to. Topics below
+# are prefixed "hte" (first of three planned new tutorials: Heterogeneous
+# Treatment Effects; "Gender Wage Gap" is the application this topic's
+# steps are built around).
+#
+# GROUND TRUTH: every number quoted below is copied verbatim from this
+# project's own executed `01_gender_wage_gap.ipynb` reference notebook (a
+# faithful Python port of the instructor's `gender_wage_gap_acs2016.R`,
+# itself a replication of Bach, Chernozhukov & Spindler 2024), n = 70,473
+# ACS 2016 respondents.
+#
+# A REAL BUG, AND WHY IT BECOMES A HAND-VERIFICATION STEP, NOT A DELEGATED
+# ONE: the source R script's BLP regression is
+#   blp_model <- lm(y ~ B + tau_hat + W_orth + tau_orth, data = blp_data, ...)
+# but `blp_data` has a column named `Y_cf`, never `y`. This does not error
+# in R -- `y` happens to still exist in the global environment from an
+# earlier, unrelated step (`y <- data$lwwage`, used in the double-selection
+# loop), so the regression silently runs against that stale variable
+# instead. In this particular script `y` and `Y_cf` are numerically
+# identical, so the bug is invisible on this data -- but it is still a bug,
+# and a dangerous one: an AI coding assistant asked to "write the BLP
+# regression" would have no way to know a student's `blp_data` column is
+# named `Y_cf` rather than `y` unless the student's own code is in front of
+# it, so this is deliberately NOT a delegated step. Instead hte5 below
+# hands the student exactly this contrast (a correct snippet and a buggy
+# one that happens to run) and asks them to catch it themselves -- the same
+# "a bug that's invisible on this data is still a bug" lesson this course's
+# JTPA and Generic-ML-simulation companion notebooks make with their own
+# source-script bugs, just enforced by the exercise design here rather than
+# by a persona.
+# ---------------------------------------------------------------------------
+
+PART_A_STEPS.update({
+    "hte2_doubleselection": {
+        "label": "HTE Step 2 -- double-selection Lasso for wage-gap heterogeneity",
+        "task": (
+            "Write a function run_double_selection(y, target_var, "
+            "controls, data) implementing post-double-selection Lasso "
+            "(Belloni, Chernozhukov & Hansen) to test whether the "
+            "interaction variable `target_var` (e.g. 'fem_x_married') "
+            "predicts log wages `y`, after selecting controls from "
+            "`controls` (which here is 10 female-interaction terms plus "
+            "roughly 50 demographic/region/occupation/industry/degree "
+            "dummies -- `target_var` itself must be excluded from the "
+            "candidate control set). (1) Run "
+            "sklearn.linear_model.LassoCV TWICE on the (non-target) "
+            "controls: once regressing y on them, once regressing "
+            "target_var's own column on them, each time recording which "
+            "columns have a nonzero fitted coefficient -- LassoCV's own "
+            "cv fold count is a free choice. (2) Take the UNION of the "
+            "two selected column sets -- this union step is given by the "
+            "definition of double selection, not a free choice, write it "
+            "in directly. (3) Refit statsmodels.api.OLS of y on a "
+            "constant, target_var, and every column in that union. (4) "
+            "Using statsmodels' HC1 heteroskedasticity-robust covariance "
+            "(get_robustcov_results(cov_type='HC1')), return the fitted "
+            "coefficient on target_var, its robust standard error, the "
+            "implied t-statistic and two-sided p-value, and the number "
+            "of selected controls. You'll call this once per "
+            "heterogeneity variable (married, nevermarried, child_19, "
+            "four hours-worked categories, years of schooling, "
+            "experience, and metro status -- 10 interactions in total) "
+            "and Holm-adjust the 10 resulting p-values for multiple "
+            "testing; on the instructor's own run, 9 of the 10 come out "
+            "significant after that correction (only metro status does "
+            "not) -- treat that as a number to check your own run "
+            "against, not one to hard-code."
+        ),
+    },
+    "hte3_individualgaps": {
+        "label": "HTE Step 3 -- individual-level predicted wage gaps",
+        "task": (
+            "Given a baseline regression's fitted female coefficient "
+            "`beta_0` (from lm(lwwage ~ female + <controls>), already "
+            "fit) and the double-selection estimates from Step "
+            "hte2_doubleselection (one coefficient per heterogeneity "
+            "variable, stored however Step hte2 returned them), write "
+            "code that computes, for every woman i in the sample, an "
+            "individual predicted gap beta_xi = beta_0 + sum_k "
+            "hat_beta_k * x_ik, summing over EVERY heterogeneity "
+            "variable that has a double-selection estimate available -- "
+            "regardless of whether that estimate's p-value was "
+            "significant (do not filter on significance here; that "
+            "would silently change what the exercise is asking you to "
+            "report). Decide for yourself how to store and look up the "
+            "per-variable coefficients (e.g. a dict keyed by variable "
+            "name) and how to loop over women and heterogeneity "
+            "variables -- that bookkeeping, and the choice of data "
+            "structure, is yours to design; the formula above is not. "
+            "Report the mean, standard deviation, 10th percentile, and "
+            "90th percentile of the resulting beta_xi distribution (on "
+            "the instructor's run: mean about -21.0%, SD about 0.111, "
+            "10th percentile about -34.0%, 90th percentile about -4.7% "
+            "-- use these only to sanity-check your own numbers, not to "
+            "hard-code them), and produce a sorted-effects plot: beta_xi "
+            "against its own percentile rank, with a horizontal "
+            "reference line at zero and another at the sample mean."
+        ),
+    },
+    "hte4_causalforest": {
+        "label": "HTE Step 4 -- causal forest nuisances and CATE",
+        "task": (
+            "Using econml.grf.RegressionForest and econml.grf."
+            "CausalForest (the Python ports of R grf's regression_forest "
+            "and causal_forest), write code that: (1) fits a "
+            "RegressionForest of log wages on the covariate matrix "
+            "X_cf, using ONLY the male (female==0) subsample, then "
+            "predicts m0_hat = E[wage | female=0, x] for EVERY "
+            "observation (not just men) -- this asymmetry (fit on a "
+            "subsample, predict on everyone) is the point of this line, "
+            "not a free choice. (2) fits a second RegressionForest of "
+            "the female indicator on X_cf using the FULL sample to get "
+            "the propensity e_hat = P(female=1 | x) for everyone, then "
+            "clips it to [0.01, 0.99] (clip bounds given directly by the "
+            "exercise, write them in). (3) fits a CausalForest on "
+            "(X_cf, female_indicator, log_wage) and predicts the CATE "
+            "tau_hat = E[wage(female) - wage(male) | x] for everyone. "
+            "n_estimators/number of trees for all three forests is a "
+            "free choice (the instructor's own run uses 2000 and takes "
+            "several minutes; consider starting smaller during "
+            "development). On the instructor's run, mean(tau_hat) is "
+            "about -18.7% with SD about 0.139 -- a number to check your "
+            "own run against approximately, given simulation noise, not "
+            "to reproduce exactly."
+        ),
+    },
+    "hte6_gates": {
+        "label": "HTE Step 6 -- GATES by quintile of the causal forest's CATE",
+        "task": (
+            "Given Step hte4's tau_hat, m0_hat, e_hat and the "
+            "orthogonalized treatment W_orth = female_indicator - "
+            "e_hat (already computed), write code implementing Group "
+            "Average Treatment Effects (GATES) by quintile of tau_hat. "
+            "(1) Add a small amount of random jitter to tau_hat to "
+            "break ties, then cut it into 5 quantile-based groups -- "
+            "the number of groups (5) and the use of quantile cutpoints "
+            "is given by the exercise, not a free choice, but exactly "
+            "how you implement the cut (e.g. pandas.qcut vs. your own "
+            "quantile/digitize logic, and how you pad the first/last "
+            "breakpoint so no observation is dropped at the boundary) "
+            "is yours to decide. (2) Build the one-hot group-indicator "
+            "matrix and multiply it elementwise by W_orth to get the "
+            "group-interacted orthogonalized treatment -- this "
+            "construction is the actual computational point of the "
+            "step; do not write out the indexing/multiplication for it, "
+            "just note what it must produce. (3) Fit a WEIGHTED least "
+            "squares regression of log wages on [m0_hat, tau_hat, "
+            "<5 group-interaction columns>] with NO intercept and "
+            "weights = 1/(e_hat*(1-e_hat)) (this weighting formula and "
+            "the no-intercept specification are given directly, write "
+            "them in), using statsmodels with HC1-robust standard "
+            "errors. (4) Extract the 5 group coefficients and their "
+            "robust SEs, and build Bonferroni-corrected confidence "
+            "intervals using critical value = scipy.stats.norm.ppf(1 - "
+            "alpha/(2*5)) for alpha=0.05 (this correction is given "
+            "directly). On the instructor's run the five quintile "
+            "effects range from about -50.5% (Q1) to about +13.0% (Q5), "
+            "rising roughly monotonically -- a shape to check your own "
+            "output against, not exact numbers to reproduce."
+        ),
+    },
+})
+
+# ---------------------------------------------------------------------------
+# Part A steps for the SECOND Course-2 tutorial, "Optimal Policy Learning"
+# (Hillstrom e-mail-targeting data: 64,000 customers in a three-arm RCT --
+# no e-mail, men's e-mail, women's e-mail -- outcomes visit/conversion/
+# spend), opl-prefixed. This is the 8th topic overall and the second
+# tutorial for the "Advanced Machine Learning" course (Toulouse School of
+# Economics, Christophe Gaillac); its own lecture material explicitly
+# labels the earlier hte/CATE topic above "Course 1" and this one "Course
+# 2" of the same two-part sequence, so opl is best read as hte's sequel,
+# not an unrelated eighth exercise. As with every prior topic, Step 1 (data
+# load + randomization-balance check) and the hand-verification step
+# (manually recomputing the AIPW/IPW pseudo-outcome Gamma_i for a couple of
+# concrete test-set customers from raw Y/D/e, since Gamma is reused,
+# unexplained, across four later sections) are deliberately NOT delegated
+# -- there is no PART_A_STEPS entry for either, following the hte1/hte5
+# convention above. Source material: the instructor's own two Hillstrom
+# notebooks (a fully-worked, non-AI-companion "solutions" version and a
+# "student" version with identical code but no written answers) -- unlike
+# the hte topic, there was no bug to design around; the step boundaries
+# below were designed from the solutions notebook's own 9 sections rather
+# than transcribed from an external exercise sheet, the same situation
+# round 10's NLP topic was in.
+# ---------------------------------------------------------------------------
+
+PART_A_STEPS.update({
+    "opl2_avgeffects": {
+        "label": "OPL Step 2 -- difference-in-means average treatment effects",
+        "task": (
+            "Write a function diff_means(data, arm, y, control='No "
+            "E-Mail') that estimates the ATE of e-mail arm `arm` "
+            "relative to `control` on outcome column `y` by a simple "
+            "difference in sample means, together with its standard "
+            "error sqrt(Var(Y|arm)/n_arm + Var(Y|control)/n_control) "
+            "(a two-sample SE, not a pooled one -- this formula is "
+            "given directly by the exercise, write it in). Call it for "
+            "both e-mail arms ('Mens E-Mail', 'Womens E-Mail') crossed "
+            "with all three outcomes ('visit', 'conversion', 'spend') "
+            "and collect the results, along with each outcome's "
+            "control-group mean, into a table. On the instructor's run: "
+            "Mens E-Mail raises visit by about 7.7 points (SE 0.3) and "
+            "Womens E-Mail by about 4.5 points (SE 0.3), on a baseline "
+            "of about 10.6% -- a number to check your own run against, "
+            "not to hard-code."
+        ),
+    },
+    "opl3_subgroup": {
+        "label": "OPL Step 3 -- subgroup effects by past purchase category",
+        "task": (
+            "Restricting to the women's-e-mail-vs-no-e-mail subsample "
+            "(`w`, already built) with its binary treatment indicator "
+            "D, write a function sub_effects(data, by) that groups the "
+            "data by column(s) `by` and, within each group, computes "
+            "the same difference-in-means effect and two-sample SE as "
+            "Step opl2_avgeffects (reuse that formula exactly, do not "
+            "re-derive it) on the `visit` outcome, plus the group's "
+            "control-group (D=0) baseline visit rate and its size n. "
+            "Call it with by=['mens','womens'] to get the 2x2 cross of "
+            "past men's/women's purchase history. On the instructor's "
+            "run, the group that only bought women's merchandise shows "
+            "a markedly larger effect (about 7.4 points) than the group "
+            "that only bought men's merchandise (about 1.1 points) -- "
+            "a pattern to check your own table against, not exact "
+            "figures to reproduce."
+        ),
+    },
+    "opl4_scores": {
+        "label": "OPL Step 4 -- a predicted-outcome risk score and a predicted-impact CATE score",
+        "task": (
+            "On the training half of the women's-e-mail-vs-no-e-mail "
+            "sample (X_tr, D_tr, Y_tr, already split), build two "
+            "separate scores. (1) RISK SCORE: fit a sklearn.ensemble."
+            "GradientBoostingClassifier on CONTROL units ONLY "
+            "(D_tr==0) to predict `visit`, then call predict_proba on "
+            "the full test-half covariate matrix X_te to get a "
+            "predicted visit probability for every test customer -- "
+            "fitting on controls only, then predicting on everyone, is "
+            "the point of this line, not a free choice. (2) IMPACT "
+            "SCORE: fit an econml.dml.CausalForestDML with model_t="
+            "sklearn.dummy.DummyClassifier(strategy='prior') (the "
+            "propensity is known from randomization, so the treatment "
+            "model is a constant -- this choice of model_t is given, "
+            "write it in) and discrete_treatment=True on (Y_tr, D_tr, "
+            "X_tr), then call .effect(X_te.values) to get a predicted "
+            "CATE for every test customer. max_depth/n_estimators/"
+            "min_samples_leaf for both models are free choices (the "
+            "instructor's own run uses GradientBoostingClassifier("
+            "max_depth=3, n_estimators=200) and CausalForestDML(..., "
+            "n_estimators=1000, min_samples_leaf=50, cv=5)). Report the "
+            "risk model's test-control AUC, the CATE score's "
+            "percentiles, the correlation between the two scores, and "
+            "the causal forest's feature importances. On the "
+            "instructor's run the AUC is about 0.64 and the two scores "
+            "correlate at about -0.08 -- almost uncorrelated -- a "
+            "number to check your own run against, not to hard-code."
+        ),
+    },
+    "opl5_blpgates": {
+        "label": "OPL Step 5 -- validating the CATE score: BLP and GATES",
+        "task": (
+            "Given the test-half outcome Y_te, treatment D_te, the "
+            "known treatment share e = D_te.mean(), and a score array "
+            "(the CATE score from Step opl4_scores, or the risk score "
+            "for comparison), write two functions. (1) blp(score): run "
+            "the Best Linear Predictor regression of Y_te on a "
+            "constant, (D_te - e), and (D_te - e)*(score - score.mean"
+            "()), by statsmodels.api.OLS with HC1-robust covariance "
+            "(this exact regressor construction is the formula given "
+            "by the exercise -- write it in directly, do not "
+            "approximate it) -- the second slope coefficient is the "
+            "heterogeneity test. (2) gates(score, K=5): cut `score` "
+            "into K quantile groups (breaking ties with pandas' rank"
+            "(method='first') before qcut, to avoid qcut failing on "
+            "duplicate score values -- this tie-breaking trick is "
+            "given directly), then within each group compute the "
+            "group's own difference-in-means effect and SE on Y_te "
+            "(reuse the Step opl2_avgeffects formula exactly). Call "
+            "blp() on the CATE score and plot gates() for both the "
+            "CATE score and the risk score on the same axes for "
+            "comparison. On the instructor's run the heterogeneity "
+            "coefficient (beta_2) is about 0.96 (strongly significant), "
+            "and the CATE-score GATES rise from near 0 in the bottom "
+            "quintiles to about 0.07-0.08 in the top, while the "
+            "risk-score GATES show no such gradient -- a pattern to "
+            "check your own output against, not exact figures to "
+            "reproduce."
+        ),
+    },
+    "opl7_targetcurve": {
+        "label": "OPL Step 7 -- targeting curves: gain from treating the top-q by score",
+        "task": (
+            "Given Gamma = D_te*Y_te/e - (1-D_te)*Y_te/(1-e) (the "
+            "per-customer AIPW/IPW pseudo-outcome, already computed -- "
+            "this is the quantity Step opl6 (not delegated) asks you "
+            "to hand-verify, and it is reused here, not re-derived), "
+            "write a function gain_curve(score, grid) that, for every "
+            "budget share q in `grid`, builds the top-q indicator pi = "
+            "1{score >= quantile(score, 1-q)} (q=0 must give the "
+            "all-zero policy -- handle that edge case explicitly, "
+            "since quantile(score, 1) is the max and could still "
+            "select ties) and returns the mean and the standard error "
+            "of the mean of pi*Gamma -- this IS the policy's estimated "
+            "value relative to treating nobody, by construction of "
+            "Gamma; write the mean/SE computation yourself, but do not "
+            "change what quantity is being averaged. Call it on a fine "
+            "grid (e.g. 21 points from 0 to 1) for the CATE score, the "
+            "risk score (high-first), and the risk score negated "
+            "(low-first), and plot all three curves with a "
+            "random-targeting reference line. On the instructor's run, "
+            "at q=0.5 the CATE-based curve gives about 0.036 extra "
+            "visits per customer against about 0.019-0.025 for the two "
+            "risk-based curves -- a comparison to check your own "
+            "output against, not exact numbers to reproduce."
+        ),
+    },
+    "opl8_policytrees": {
+        "label": "OPL Step 8 -- doubly-robust policy trees and their sensitivity to the cost",
+        "task": (
+            "With a cost c (e.g. 0.03) expressed in visit-probability "
+            "units, write (1) a function net_gain(pi) returning the "
+            "mean, SE, and treated-share of pi*(Gamma - c) (Gamma as "
+            "in Step opl7_targetcurve) -- this is the net-of-cost "
+            "value of a policy; reuse Gamma's definition exactly, do "
+            "not recompute it differently. (2) a function fit_tree"
+            "(depth, cost) that fits an econml.policy.DRPolicyTree with "
+            "model_propensity=sklearn.dummy.DummyClassifier(strategy="
+            "'prior') (propensity is known, as in Step opl4_scores) "
+            "and model_regression a GradientBoostingRegressor, "
+            "max_depth=depth, trained on the NET outcome Y_tr - "
+            "cost*D_tr against D_tr and X_tr (training on the "
+            "cost-adjusted outcome, not the raw outcome, is the point "
+            "of this call -- write it in exactly). min_samples_leaf/"
+            "n_estimators/cv for the tree and its nuisance models are "
+            "free choices (the instructor's own run uses "
+            "min_samples_leaf=500, cv=5). Compare, on the test half: "
+            "e-mailing nobody, e-mailing everyone, the plug-in rule "
+            "1{CATE_score >= c}, and fit_tree at depths 1, 2, 3. THEN, "
+            "reusing fit_tree, sweep the cost c itself over a small "
+            "grid (e.g. [0, 0.02, 0.03, 0.05, 0.07]) and report how "
+            "the depth-1 tree's net gain and treated-share change with "
+            "c. On the instructor's run the depth-1 tree beats every "
+            "deeper tree and the plug-in rule (net gain about 0.025 "
+            "vs. 0.014-0.020), e-mailing everyone stops beating "
+            "e-mailing nobody once c exceeds about 0.044, and by "
+            "c=0.07 the depth-1 tree treats nobody -- a pattern to "
+            "check your own output against, not exact figures to "
+            "reproduce."
+        ),
+    },
+    "opl9_multiaction": {
+        "label": "OPL Step 9 -- choosing which e-mail to send: a three-action policy tree",
+        "task": (
+            "Extend to THREE actions (no e-mail=0, men's e-mail=1, "
+            "women's e-mail=2) using the FULL sample (all three "
+            "experimental arms, a fresh train/test split -- do not "
+            "reuse the two-arm w/X_tr/X_te from earlier steps). Fit an "
+            "econml.policy.DRPolicyTree the same way as Step "
+            "opl8_policytrees's fit_tree, but with the multi-valued "
+            "treatment array T_tr (not a 0/1 D_tr) and net outcome "
+            "Y_tr - c*(T_tr > 0) (every e-mail costs the same c; "
+            "sending nothing is free -- this cost structure is given, "
+            "write it in), then call .predict(X_te) to get a predicted "
+            "action in {0,1,2} for every test customer. Write a "
+            "function value(actions) computing the IPW value, net of "
+            "cost, of any proposed action assignment: mean over test "
+            "customers of 1{T_te == actions} * Y_te / p_arm[T_te], "
+            "minus c times the share of customers that action assigns "
+            "to a nonzero action (p_arm is each arm's share in the "
+            "test data, already computable from T_te) -- this "
+            "IPW-with-3-arms formula generalizes Step opl7_targetcurve's "
+            "Gamma to more than 2 arms; write it in exactly as "
+            "described, do not substitute a different multi-arm value "
+            "estimator. Compare the learned tree's value against "
+            "always sending nobody / men's e-mail / women's e-mail to "
+            "everyone. On the instructor's run the tree sends the "
+            "men's e-mail to about 91% of customers and the women's "
+            "e-mail only to a small, recent/low-spend subgroup, and "
+            "its value (about 0.152) is statistically indistinguishable "
+            "from simply sending the men's e-mail to everyone (about "
+            "0.153) -- a comparison to check your own output against, "
+            "not exact figures to reproduce."
+        ),
+    },
+})
+
+# ---------------------------------------------------------------------------
+# NINTH topic (round 16): Ethics and ML -- Fairness, Auditing, and
+# Explainability. Course 6 of "Advanced Machine Learning" (the same course
+# hte/Course 1 and opl/Course 2 belong to) -- NOT a sequel to hte/opl the
+# way opl was hte's sequel; it is an independent third tutorial of the same
+# course, but reuses the COMPAS risk model the user's own uploaded,
+# non-AI-companion `supervised_learning_econ_pretrial_risk.ipynb` already
+# built (itself adapted from the "Foundations of Machine Learning"/Oxford
+# course's own pretrial-risk illustration). fair1 (load+fit, hand-typed) is
+# that notebook's own Steps 0-7 verbatim, re-executed; everything from
+# fair2 onward is new content built around the lecture's three fairness
+# criteria, Chouldechova's identity, an optimal-fair decision rule, a
+# DML/Oaxaca-style audit (Bied et al. 2023, adapted from gender to race),
+# and Shapley-value/counterfactual explainability. Deliberately NOT
+# attempted: adversarial debiasing (deck Section 3) -- that needs a
+# learned embedding from a recommender-style architecture (MUSE's own
+# encoder+adversary), which has no natural analogue on COMPAS's 7 tabular
+# features and a single logistic-regression risk score; see the README's
+# "what was not done" note for this round.
+# ---------------------------------------------------------------------------
+PART_A_STEPS.update({
+    "fair2_groupmetrics": {
+        "label": "Fairness Step 2 -- the three group-fairness criteria",
+        "task": (
+            "Using the fitted risk model's test-sample predictions "
+            "(pred_test, proba_test) and each defendant's race (race_test, "
+            "already loaded), write a function group_fairness_table(ytest, "
+            "pred_test, proba_test, race_test, groups) that returns one row "
+            "per group in `groups` with: n, the base rate P(Y=1|S=s), the "
+            "ACCEPTANCE RATE P(Yhat=1|S=s) (independence/demographic "
+            "parity), TPR/FPR/FNR (separation/equalized odds), and PPV/NPV "
+            "(sufficiency/calibration) -- compute these from "
+            "sklearn.metrics.confusion_matrix(ytest[mask], pred_test[mask])"
+            ".ravel() for each group's boolean mask, exactly as the "
+            "uploaded notebook's own Step 'error rates across groups' cell "
+            "already does for FPR/FNR alone; extend it to the other four "
+            "quantities rather than writing a new method from scratch. "
+            "Then write disparate_impact_ratio(table, groups) returning "
+            "min(accept_rate)/max(accept_rate) across the two groups. Call "
+            "both for groups=['African-American','Caucasian']. On the "
+            "instructor's run the disparate-impact ratio is about 0.62 "
+            "(below the 0.80 four-fifths-rule threshold: independence "
+            "fails), the TPR/FPR gaps are both substantial (separation "
+            "fails), but the PPV gap is much smaller, about 0.045 -- a "
+            "pattern to check your own table against, not exact figures "
+            "to reproduce."
+        ),
+    },
+    "fair4_optimalfair": {
+        "label": "Fairness Step 4 -- an optimal decision rule under demographic parity",
+        "task": (
+            "Implement the group-specific-threshold construction from the "
+            "lecture (Course 6, 'Optimal decision under a fairness "
+            "constraint'): write group_threshold_for_rate(scores, q) "
+            "returning the smallest threshold t with P(score>=t)<=q, i.e. "
+            "np.quantile(scores, 1-q) (this exact formula is given by the "
+            "lecture's own derivation -- write it in, do not approximate "
+            "it with a search). Then write fair_decision_rule(proba_a, "
+            "proba_c, q) that calls group_threshold_for_rate separately "
+            "for each group's own proba array and returns (t_a, t_c, "
+            "pred_a, pred_c), the two thresholds and the two groups' "
+            "resulting binary decisions. Call it with q equal to the "
+            "POOLED acceptance rate of the two groups under the "
+            "unconstrained common threshold 0.5 (compute q yourself from "
+            "proba_test, do not hard-code a value), and report the "
+            "realized acceptance rate, accuracy, TPR, FPR, and PPV in "
+            "each group, alongside the unconstrained (common-threshold) "
+            "numbers for comparison. Note: because scores are drawn from "
+            "a finite sample, matching q exactly in both groups is "
+            "generally impossible with discrete np.quantile -- a small "
+            "residual gap (well under a percentage point) is expected and "
+            "is not a bug. On the instructor's run the constrained rule "
+            "equalizes acceptance at about 39% in both groups but "
+            "sacrifices some accuracy (about 0.675 unconstrained vs. "
+            "about 0.639 constrained) and leaves White defendants with a "
+            "markedly lower PPV than Black defendants (about 0.55 vs. "
+            "0.69) -- a pattern to check your own output against, not "
+            "exact figures to reproduce."
+        ),
+    },
+    "fair5_audit": {
+        "label": "Fairness Step 5 -- a DML/Oaxaca-style conditional race-gap audit",
+        "task": (
+            "Adapting Bied et al. (2023)'s auditing design (Course 6, "
+            "'From Oaxaca to Double Machine Learning') from gender to "
+            "race: write dml_partial_out(outcome, S, Z, n_splits=5, "
+            "learner) implementing Robinson's (1988) cross-fitted "
+            "partialling-out estimator of tau in outcome - m(Z) = (S - "
+            "e(Z))*tau + eps. Inside each of KFold(n_splits).split(Z)'s "
+            "folds: fit a nuisance model for m (regression of `outcome` "
+            "on Z, use sklearn.linear_model.LassoCV when learner=='lasso' "
+            "or sklearn.ensemble.RandomForestRegressor when learner== "
+            "'rf') and for e (classification of `S` on Z, "
+            "LogisticRegressionCV or RandomForestClassifier respectively) "
+            "on the TRAIN fold only, then predict on the held-out fold -- "
+            "this cross-fitting structure is the point of the exercise "
+            "and is given; do not fit and predict on the same fold. "
+            "After collecting out-of-fold m_hat/e_hat for every "
+            "observation, compute tau_hat = sum((S-e_hat)*(outcome-m_hat)) "
+            "/ sum((S-e_hat)**2) and its sandwich-form standard error (the "
+            "formula is given by the lecture's own Neyman-orthogonal "
+            "moment condition -- write the two sums in directly). Apply "
+            "it twice, with S=race (African-American vs. Caucasian "
+            "defendants only) and Z the SAME covariates the risk model "
+            "itself was allowed to use (age, priors, juvenile counts, "
+            "charge degree, sex): once with outcome = the model's own "
+            "predicted risk eta_hat(Z), once with outcome = the actual "
+            "two_year_recid. Report both the raw (unconditional) gap and "
+            "the DML-estimated conditional gap for each outcome, with "
+            "both the Lasso and the random-forest nuisance learners. On "
+            "the instructor's run the raw gap is substantial for both "
+            "outcomes (about +0.12 to +0.13, Black minus White), but the "
+            "DML-conditional gap in the MODEL'S OWN predicted risk "
+            "collapses to nearly zero (about 0.001-0.002) -- almost by "
+            "construction, since that score is literally a function of "
+            "Z alone -- while the conditional gap in the ACTUAL outcome "
+            "is small and not clearly distinguishable from zero (about "
+            "0.01-0.02, with a standard error of similar size) -- a "
+            "pattern to check your own output against, not exact figures "
+            "to reproduce."
+        ),
+    },
+    "fair6_shap_linear": {
+        "label": "Fairness Step 6 -- closed-form Shapley values for the linear score",
+        "task": (
+            "The fitted risk model is a StandardScaler followed by a "
+            "LINEAR logistic regression, so its pre-sigmoid score is "
+            "exactly the linear case the lecture derives in closed form "
+            "('Example 1: linear model'): phi_j(x) = beta_j * (x_j_scaled "
+            "- E[X_j]). Write shapley_linear(best_model, x_row, "
+            "background_mean_scaled) that pulls beta and the intercept "
+            "out of best_model.named_steps['logit'], transforms x_row "
+            "with best_model.named_steps['scale'], and returns (phi, f_x, "
+            "f_mean) with phi the length-7 array of per-feature Shapley "
+            "values and f_x/f_mean the linear score at x and at the "
+            "background mean -- this exact formula is given directly by "
+            "the lecture; write it in, do not call a SHAP library here. "
+            "Apply it to the SAME individual used elsewhere in this "
+            "notebook (Xtest.iloc[0]), using the test sample's own "
+            "scaled-feature mean as the background, and verify the "
+            "EFFICIENCY axiom: phi.sum() should equal f_x - f_mean to "
+            "floating-point precision. Report phi for every feature, "
+            "sorted by magnitude. On the instructor's run, priors_count "
+            "and c_charge_degree_M carry the largest-magnitude (negative) "
+            "contributions for this individual, consistent with a "
+            "low-predicted-risk defendant with no prior offenses -- a "
+            "pattern to check your own output against, not exact figures "
+            "to reproduce."
+        ),
+    },
+    "fair7_shap_general": {
+        "label": "Fairness Step 7 -- KernelSHAP on the full nonlinear probability",
+        "task": (
+            "Step fair6_shap_linear's closed form only works because the "
+            "model's SCORE is linear; predict_proba applies a sigmoid on "
+            "top, so Shapley values for the PROBABILITY itself need a "
+            "general-purpose estimator. Using the `shap` package, build "
+            "shap.KernelExplainer(f, background) where f(Z) calls "
+            "best_model.predict_proba on Z and returns column 1, and "
+            "`background` is a sample of about 100 test rows (shap."
+            "KernelExplainer's own model-agnostic sampling scheme and its "
+            "`nsamples` argument are given by the package; a few hundred "
+            "is enough here given the small feature count -- do not try "
+            "to push this much higher, KernelSHAP's cost scales with "
+            "nsamples times the query set size). Compute SHAP values for "
+            "a sample of about 60 test individuals to get a GLOBAL mean "
+            "absolute importance per feature, and separately for the SAME "
+            "individual (Xtest.iloc[0]) used in fair6_shap_linear, "
+            "verifying the efficiency check explainer.expected_value + "
+            "shap_values.sum() equals that individual's predicted "
+            "probability. Compare the global ranking to sklearn.inspection"
+            ".permutation_importance(best_model, Xtest, ytest, "
+            "scoring='roc_auc'). On the instructor's run priors_count and "
+            "age dominate both rankings (consistent with each other), and "
+            "the per-individual decomposition for Xtest.iloc[0] matches "
+            "the SIGN of every feature's fair6_shap_linear contribution, "
+            "though not its exact value (the nonlinear sigmoid redistributes "
+            "magnitudes) -- a pattern to check your own output against, "
+            "not exact figures to reproduce."
+        ),
+    },
+    "fair8_counterfactual": {
+        "label": "Fairness Step 8 -- a counterfactual-explanation / recourse computation",
+        "task": (
+            "Implement the closed-form special case of Wachter et al. "
+            "(2017)'s counterfactual explanation that is available here "
+            "because the model's decision boundary is linear in the "
+            "scaled features: write counterfactual_boundary(best_model, "
+            "x_row, feature, feature_cols) that holds every feature of "
+            "x_row FIXED except `feature`, and solves for the value of "
+            "`feature` (in its RAW, unscaled units) at which the model's "
+            "linear score crosses zero (predicted probability 0.5) -- "
+            "pull beta/intercept/scaler mean and scale for that one "
+            "column exactly as fair6_shap_linear does, then solve the "
+            "one-variable linear equation for the raw boundary value "
+            "algebraically (this is a closed-form solve, not a search "
+            "loop -- write the algebra in directly). Apply it to a test "
+            "individual currently predicted high-risk (choose one with "
+            "priors_count > 0 and a probability comfortably above 0.5, "
+            "not one already on the boundary) and the feature "
+            "'priors_count', and verify by perturbation: construct a copy "
+            "of that individual with priors_count set to the computed "
+            "boundary value and confirm best_model.predict_proba on it is "
+            "(approximately) 0.5. Discuss explicitly, in a 'Your answer' "
+            "cell, whether this is a USABLE form of recourse given that "
+            "priors_count records past offenses and is not something a "
+            "person can simply choose to reduce. On the instructor's run "
+            "a defendant with priors_count=8 and predicted probability "
+            "about 0.63 would need priors_count to be about 4.7 or lower "
+            "to cross the 0.5 threshold -- a number to check your own "
+            "chosen individual's output against, not an exact figure to "
+            "reproduce (your own chosen individual's boundary value will "
+            "differ)."
+        ),
+    },
+})
+
+# ---------------------------------------------------------------------------
 # Part B, Step 8: Skeptical Reviewer. Text below is the promptbox from the
 # exercise, verbatim, turned into a system prompt. The backend enforces the
 # "4-5 exchanges then summary" structure server-side (see main.py) rather
@@ -1691,6 +2303,134 @@ SKEPTICAL_REVIEWER_DML_SYSTEM_PROMPT = (
     "three dimensions."
 )
 
+SKEPTICAL_REVIEWER_HTE_SYSTEM_PROMPT = (
+    "You are a skeptical applied econometrician reviewing a student's "
+    "interpretation of a heterogeneous-treatment-effects analysis of the "
+    "US gender wage gap (ACS 2016 data): a double-selection Lasso giving "
+    "individual-level predicted wage gaps, and a separate causal-forest / "
+    "Generic-ML analysis (BLP and GATES) on the same question. Your role "
+    "is to challenge the student's reasoning by asking probing questions "
+    "about:\n"
+    "1. ONE NUMBER VS. A DISTRIBUTION: the exercise produces an "
+    "individual-level predicted gap for every woman (ranging roughly from "
+    "a few percent to over 30 log points across the sample in the "
+    "instructor's own run), not a single number -- press on whether the "
+    "student is still reporting or thinking about 'the' gender wage gap "
+    "as one headline figure, and whether they can say concretely what two "
+    "different women's covariate profiles would have to look like to "
+    "produce the gap they're citing as representative.\n"
+    "2. WHAT THE CAUSAL FOREST'S HET COEFFICIENT ACTUALLY LICENSES: a "
+    "significant BLP heterogeneity coefficient (beta2) tells you the "
+    "forest's CATE ranking is informative, not noise -- press on whether "
+    "the student is reading that significance as validating the "
+    "MAGNITUDE or SHAPE of their GATES quintile effects too, versus only "
+    "the claim that genuine heterogeneity exists somewhere in the "
+    "covariate space; and whether a result built from one causal forest, "
+    "one fitted on one sample, should be read with the same confidence as "
+    "a result that was cross-checked against the (methodologically very "
+    "different) double-selection estimates.\n"
+    "3. TRUSTING YOUR OWN CODE'S COLUMN NAMES: this exercise's own source "
+    "material contains a real bug where a regression was accidentally "
+    "fit against a stale, same-valued variable instead of the DataFrame "
+    "column actually intended, and it ran without error precisely because "
+    "the two happened to coincide on that data. Press the student on "
+    "whether they independently checked that every variable name inside "
+    "their own BLP/GATES regression calls refers to the column they "
+    "think it does (e.g. by printing the regression's design matrix "
+    "columns before fitting), or whether they are trusting that the code "
+    "ran without an error as proof that it is computing the right "
+    "thing -- those are not the same guarantee, and this is exactly the "
+    "kind of mistake that is invisible until the two variables stop "
+    "coinciding.\n\n"
+    "Be Socratic: ask leading questions, do not give direct answers. Keep "
+    "responses concise (2-4 sentences). Acknowledge good points. Do not "
+    "drift into other topics, code, or unrelated advice -- stay on these "
+    "three dimensions."
+)
+
+SKEPTICAL_REVIEWER_OPL_SYSTEM_PROMPT = (
+    "You are a skeptical applied econometrician reviewing a student's "
+    "interpretation of an optimal-policy-learning analysis of the "
+    "Hillstrom e-mail targeting experiment (64,000 customers, three arms: "
+    "no e-mail, men's e-mail, women's e-mail): a risk score and a "
+    "causal-forest CATE score, BLP/GATES validation, IPW targeting "
+    "curves, and doubly-robust policy trees. Your role is to challenge "
+    "the student's reasoning by asking probing questions about:\n"
+    "1. PREDICTION OF OUTCOME VS. PREDICTION OF IMPACT: the risk score "
+    "(who is likely to visit anyway) and the CATE score (who is moved by "
+    "the e-mail) are almost uncorrelated in this exercise -- press on "
+    "whether the student can state, in their own words, a concrete "
+    "customer profile for which the two scores would disagree about whom "
+    "to target, and whether any targeting rule they propose is actually "
+    "answering the causal question ('who benefits') rather than the "
+    "easier predictive one ('who would act anyway').\n"
+    "2. OUT-OF-SAMPLE POLICY-VALUE VALIDITY: a policy tree's estimated "
+    "value is only honest when both the tree AND the score it was "
+    "compared against were evaluated on data they were not fit on -- "
+    "press on whether the student can point to exactly which half "
+    "(train or test) each number in their comparison table came from, "
+    "and why a deeper, more flexible tree can show a WORSE out-of-sample "
+    "value than a shallower one despite fitting the training data at "
+    "least as well.\n"
+    "3. WHAT 'WHOM TO TREAT' IS CONDITIONAL ON: every targeting result in "
+    "this exercise is about whom to send the WOMEN'S e-mail to, relative "
+    "to sending nothing -- press on whether the student's conclusions "
+    "about personalization value still hold once a better action (the "
+    "men's e-mail, which this exercise's own extension shows most "
+    "customers respond to more) is added to the choice set, and whether "
+    "they are distinguishing 'gains from treating the right people' from "
+    "'gains from treating people with the right ACTION.'\n\n"
+    "Be Socratic: ask leading questions, do not give direct answers. Keep "
+    "responses concise (2-4 sentences). Acknowledge good points. Do not "
+    "drift into other topics, code, or unrelated advice -- stay on these "
+    "three dimensions."
+)
+
+SKEPTICAL_REVIEWER_FAIR_SYSTEM_PROMPT = (
+    "You are a skeptical applied econometrician reviewing a student's "
+    "interpretation of a fairness/auditing/explainability analysis of a "
+    "COMPAS-style pretrial recidivism risk model: the three group-fairness "
+    "criteria (independence, separation, sufficiency) and Chouldechova's "
+    "impossibility identity, an optimal decision rule under a demographic-"
+    "parity constraint, a DML/Oaxaca-style conditional audit of the race "
+    "gap, and Shapley-value/counterfactual explanations. Your role is to "
+    "challenge the student's reasoning by asking probing questions about:\n"
+    "1. WHICH CRITERION, AND WHOSE CHOICE: this exercise's own numbers show "
+    "independence and separation both fail while sufficiency (PPV) comes "
+    "close to holding -- press on whether the student is treating their "
+    "preferred criterion as the objectively 'correct' one, or can state "
+    "the normative judgment (whose complaint matters more: a flagged "
+    "low-risk defendant, or an unflagged high-risk one?) that picking it "
+    "actually encodes, given that Chouldechova's identity shows these "
+    "criteria cannot be reconciled once base rates differ.\n"
+    "2. CONDITIONAL GAP VS. FULL FAIRNESS: the DML audit finds the "
+    "conditional gap in the MODEL'S OWN predicted risk collapses to "
+    "nearly zero once the same covariates the model used are controlled "
+    "for -- press on whether the student recognizes this is close to "
+    "AUTOMATIC for any score built only from those covariates (Kasy and "
+    "Abebe's critique: a decision-maker that only uses legitimate "
+    "features will look 'fair' under predictive parity almost by "
+    "construction), and whether a small conditional gap in the ACTUAL "
+    "outcome (two_year_recid) settles the fairness question either, given "
+    "that an arrest is itself an imperfect, policing-intensity-dependent "
+    "proxy for the 'true' underlying behavior the model is trying to "
+    "predict.\n"
+    "3. SHAP IS NOT CAUSAL, AND NOT A FAIRNESS TEST: a feature's Shapley "
+    "value explains the MODEL's computation, not the world, and a small "
+    "or zero Shapley value for race (which was never even in the feature "
+    "set) says nothing about whether race-correlated proxies (e.g. "
+    "priors_count, itself shaped by differential policing/arrest rates) "
+    "are carrying its effect -- press on whether the student is reading "
+    "feature importance or a counterfactual-recourse distance as a causal "
+    "claim about what would happen to a defendant's actual future "
+    "behavior, or as evidence the model is unbiased, rather than as a "
+    "description of what the fitted function currently does.\n\n"
+    "Be Socratic: ask leading questions, do not give direct answers. Keep "
+    "responses concise (2-4 sentences). Acknowledge good points. Do not "
+    "drift into other topics, code, or unrelated advice -- stay on these "
+    "three dimensions."
+)
+
 SKEPTICAL_REVIEWER_PROMPTS = {
     "classification": SKEPTICAL_REVIEWER_SYSTEM_PROMPT,
     "shrinkage": SKEPTICAL_REVIEWER_SHRINKAGE_SYSTEM_PROMPT,
@@ -1698,6 +2438,9 @@ SKEPTICAL_REVIEWER_PROMPTS = {
     "conformal": SKEPTICAL_REVIEWER_CONFORMAL_SYSTEM_PROMPT,
     "nlp": SKEPTICAL_REVIEWER_NLP_SYSTEM_PROMPT,
     "dml": SKEPTICAL_REVIEWER_DML_SYSTEM_PROMPT,
+    "hte": SKEPTICAL_REVIEWER_HTE_SYSTEM_PROMPT,
+    "opl": SKEPTICAL_REVIEWER_OPL_SYSTEM_PROMPT,
+    "fairness": SKEPTICAL_REVIEWER_FAIR_SYSTEM_PROMPT,
 }
 
 # ---------------------------------------------------------------------------
