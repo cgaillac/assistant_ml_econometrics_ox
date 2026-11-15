@@ -684,7 +684,14 @@ PART_A_STEPS.update({
             "bin test points into >=6 bins of x and plot each method's "
             "mean interval width per bin on the same axes, to show "
             "whether the two adaptive methods actually widen where the "
-            "true noise variance is higher (large x)."
+            "true noise variance is higher (large x). PITFALL: this step "
+            "reuses the SAME train/calibration/test split from Step 2 -- "
+            "do not call train_test_split again here to produce a fresh "
+            "3-way (or worse, 6-way) split; a single train_test_split "
+            "call on two arrays only ever returns 4 arrays, never 6, so "
+            "trying to unpack X_train, X_calib, X_test, y_train, "
+            "y_calib, y_test from one call raises a ValueError. Reuse "
+            "Step 2's own split variables and fitted f_hat directly."
         ),
     },
     "cf4_digit_sets": {
@@ -730,7 +737,16 @@ PART_A_STEPS.update({
             "prediction set has size 1 ('easy') and some where it has "
             "size >= 3 ('ambiguous'), titling each with its true label "
             "and its RAPS prediction set, colored green if the true "
-            "label is in the set and red if not."
+            "label is in the set and red if not. PITFALL: in step (5), "
+            "score every CANDIDATE class against each TEST point's own "
+            "predicted probabilities (probs_test) -- do not search the "
+            "calibration-set scores array inside a loop over the test "
+            "set, which silently reuses the same (wrong) calibration "
+            "indices for every test point and never actually looks at "
+            "probs_test. Also use the SAME ceiling-corrected q_hat "
+            "formula as every other conformal step for both scores, not "
+            "np.percentile, which is a different (non-conservative) "
+            "quantile convention."
         ),
     },
     "cf5_group_coverage": {
@@ -763,7 +779,16 @@ PART_A_STEPS.update({
             "covered/missed), the fitted regression line, and the "
             "shaded band (constant width in the left panel, wider for "
             "group 1 than group 0 in the right panel), with each "
-            "group's realized coverage annotated on the plot."
+            "group's realized coverage annotated on the plot. PITFALL: "
+            "if you use np.random.default_rng() for randomness here, "
+            "note that the returned Generator object has NO .seed() "
+            "method (unlike the legacy np.random.RandomState) -- pass "
+            "the seed when you CREATE it, e.g. "
+            "np.random.default_rng(seed=0), not by calling rng.seed(0) "
+            "afterward, which raises an AttributeError. Also compute "
+            "q_hat_g per group with the SAME ceiling-corrected formula "
+            "used for the pooled q_hat, not a hardcoded "
+            "quantile(0.975)-style call."
         ),
     },
 })
@@ -900,7 +925,12 @@ PART_A_STEPS.update({
             "accuracy. (3) Refit RidgeClassifier at the best alpha on "
             "the full training set, predict on the test set, and print "
             "the chosen alpha, the test accuracy, and a full "
-            "classification_report."
+            "classification_report. PITFALL: Step nlp3 already produces "
+            "X_train/X_val/X_test and y_train/y_val/y_test directly -- "
+            "reuse those exact variables. Do not assume a single "
+            "combined X/y array exists that still needs to be split "
+            "with train_test_split; no such array was ever created, and "
+            "referencing X/y here raises a NameError."
         ),
     },
     "nlp6_finetune": {
@@ -937,7 +967,12 @@ PART_A_STEPS.update({
             "in the reference run. If you are on CPU, budget the time, "
             "reduce num_train_epochs for a faster development run before "
             "your final submission, or switch to a GPU runtime (e.g. in "
-            "Colab: Runtime > Change runtime type > GPU) first."
+            "Colab: Runtime > Change runtime type > GPU) first. PITFALL: "
+            "the trainer.train() call itself must be an ACTIVE, "
+            "uncommented line in the code you write -- the runtime-"
+            "budget guidance above belongs in a separate comment, never "
+            "as a reason to comment out trainer.train() itself, which "
+            "would mean the model never actually gets fine-tuned."
         ),
     },
     "nlp7_eval_compare": {
@@ -956,7 +991,14 @@ PART_A_STEPS.update({
             "normalize='true') and a heatmap (e.g. seaborn's heatmap, or "
             "sklearn's ConfusionMatrixDisplay), with the three class "
             "names as tick labels and each subplot's title naming the "
-            "method and its accuracy."
+            "method and its accuracy. PITFALL: trainer.predict(...) "
+            "returns a PredictionOutput object, not a raw array -- call "
+            "np.argmax on its .predictions attribute "
+            "(trainer.predict(...).predictions), not on the object "
+            "itself, which raises a ValueError. Also reuse whatever "
+            "variable name you gave the Step nlp5 zero-shot accuracy "
+            "earlier, rather than inventing a new name for it here that "
+            "nothing else defines."
         ),
     },
     "nlp8_attention_plot": {
@@ -980,7 +1022,14 @@ PART_A_STEPS.update({
             "attention tensor (out.attentions[-1][0]), average it over "
             "the attention heads (mean over axis 0, giving a T x T "
             "matrix), and plot it as a heatmap with the decoded token "
-            "strings as tick labels on both axes."
+            "strings as tick labels on both axes. PITFALL: the "
+            "selection rule in (1) is itself required CODE, not a value "
+            "to leave as a string blank -- actually implement the rule "
+            "(iterate over correctly-classified test sentences of each "
+            "class and take the one with the highest predicted "
+            "probability for its true class); do not write placeholder "
+            "assignments like hawkish_sentence = \"___\" that leave the "
+            "selection unimplemented."
         ),
     },
     "nlp9_hawkdove_axis": {
@@ -1014,7 +1063,15 @@ PART_A_STEPS.update({
             "print Cohen's d for the separation between the Hawkish and "
             "Dovish groups' mean projections: (mean_hawk_score - "
             "mean_dove_score) / overall_std_of_hawk_score -- this "
-            "formula is given, write it in directly."
+            "formula is given, write it in directly. PITFALL: if the "
+            "label array you filter by (e.g. y_test) is INTEGER-coded "
+            "(0/1/2, per the id2label convention fixed in Step nlp6), "
+            "do not compare it to string class names like 'Hawkish' -- "
+            "comparing an integer array to a string does NOT raise an "
+            "error, it silently returns an all-False mask, so every "
+            "downstream histogram and Cohen's d would be computed on "
+            "empty data with no warning at all. Filter using the "
+            "integer codes instead."
         ),
     },
     "nlp10_stance_index": {
@@ -1049,7 +1106,15 @@ PART_A_STEPS.update({
             "leaning vs. dovish-leaning months) and, if the CPI fetch "
             "succeeded, overlay year-on-year CPI inflation on a "
             "secondary y-axis with a horizontal reference line at the 2% "
-            "target."
+            "target. PITFALL: id2label maps 0 to 'Dovish' and 1 to "
+            "'Hawkish' (fixed in Step nlp6) -- double-check which column "
+            "index of the softmax output is actually 'Hawkish' before "
+            "writing stance = probs[:, i] - probs[:, j]; swapping the "
+            "two silently flips the sign of the entire index with no "
+            "error. Also write out the actual batched-inference loop "
+            "over the full corpus explicitly (reusing Step nlp3's own "
+            "batching approach) rather than leaving the whole "
+            "forward-pass call as a single ambiguous blank."
         ),
     },
 })
@@ -1438,7 +1503,15 @@ PART_A_STEPS.update({
             "testing; on the instructor's own run, 9 of the 10 come out "
             "significant after that correction (only metro status does "
             "not) -- treat that as a number to check your own run "
-            "against, not one to hard-code."
+            "against, not one to hard-code. PITFALL: "
+            "get_robustcov_results(cov_type='HC1') returns .params/"
+            ".bse/.pvalues as plain numpy arrays, NOT pandas Series -- "
+            "you cannot index them by column name the way you could "
+            "with the un-robust model.params. Look up target_var's "
+            "position first, e.g. with "
+            "model.model.exog_names.index(target_var), and use that "
+            "integer position instead; indexing the robust results "
+            "object by name raises an IndexError."
         ),
     },
     "hte3_individualgaps": {
@@ -1495,7 +1568,14 @@ PART_A_STEPS.update({
             "development). On the instructor's run, mean(tau_hat) is "
             "about -18.7% with SD about 0.139 -- a number to check your "
             "own run against approximately, given simulation noise, not "
-            "to reproduce exactly."
+            "to reproduce exactly. PITFALL: econml.grf.CausalForest."
+            "fit's outcome keyword is the lowercase y= (not Y=) -- "
+            "check the exact signature with inspect.signature if "
+            "unsure, since the capitalized keyword raises a TypeError. "
+            "Also pick ONE consistent variable name for the raw wage "
+            "column here (this notebook's later GATES step reuses it), "
+            "rather than inventing a fresh name that the rest of the "
+            "notebook doesn't recognize."
         ),
     },
     "hte6_gates": {
@@ -1548,7 +1628,8 @@ PART_A_STEPS.update({
 # load + randomization-balance check) and the hand-verification step
 # (manually recomputing the AIPW/IPW pseudo-outcome Gamma_i for a couple of
 # concrete test-set customers from raw Y/D/e, since Gamma is reused,
-# unexplained, across four later sections) are deliberately NOT delegated
+# unexplained, across several later sections -- 5b, 6, 7/8, and 9 as of
+# round 17) are deliberately NOT delegated
 # -- there is no PART_A_STEPS entry for either, following the hte1/hte5
 # convention above. Source material: the instructor's own two Hillstrom
 # notebooks (a fully-worked, non-AI-companion "solutions" version and a
@@ -1557,6 +1638,16 @@ PART_A_STEPS.update({
 # below were designed from the solutions notebook's own 9 sections rather
 # than transcribed from an external exercise sheet, the same situation
 # round 10's NLP topic was in.
+#
+# Round 17 revision: the instructor's own solutions notebook was updated
+# with a new "Section 5b" (testing whether the GATE differs between two
+# cells -- one pre-specified, one algorithm-chosen -- via a t-test built
+# from the same AIPW/IPW pseudo-outcome Gamma_i the hand-verification step
+# already introduces). This added ONE new delegated step, opl5b_gatetest,
+# below -- mirroring round 12's precedent for revising an EXISTING topic in
+# place (no new topic, no renumbering of opl7/opl8/opl9, no change to this
+# topic's Skeptical Reviewer prompt, since its three existing dimensions
+# already cover sample-splitting validity).
 # ---------------------------------------------------------------------------
 
 PART_A_STEPS.update({
@@ -1658,6 +1749,46 @@ PART_A_STEPS.update({
             "and the CATE-score GATES rise from near 0 in the bottom "
             "quintiles to about 0.07-0.08 in the top, while the "
             "risk-score GATES show no such gradient -- a pattern to "
+            "check your own output against, not exact figures to "
+            "reproduce."
+        ),
+    },
+    "opl5b_gatetest": {
+        "label": "OPL Step 5b -- testing heterogeneity across two pre-specified or algorithm-chosen cells",
+        "task": (
+            "Given the test-half outcome Y_te, treatment D_te, and the "
+            "known treatment share e = D_te.mean(), build the per-"
+            "customer AIPW/IPW pseudo-outcome Gamma = D_te*Y_te/e - "
+            "(1-D_te)*Y_te/(1-e) (this is the SAME quantity Step opl6 "
+            "[not delegated] asks you to hand-verify by hand on two "
+            "customers first -- reuse that exact formula here, do not "
+            "re-derive it). It satisfies E[Gamma | X] = tau(X), so the "
+            "GATE of any cell (a boolean mask over the test half) is "
+            "estimated by the mean of Gamma within that cell. Write a "
+            "function gate_diff(in_a, in_b) that takes two boolean "
+            "masks over the test half and returns the two cells' GATE "
+            "estimates, their difference, and a standard error for "
+            "that difference built from the influence function infl = "
+            "in_a*(Gamma-GATE_A)/P(in_a) - in_b*(Gamma-GATE_B)/P(in_b) "
+            "(SE = std(infl, ddof=1)/sqrt(n) -- this is the Chernozhukov"
+            "-Fernandez-Val-Melly-style influence-function construction "
+            "the exercise specifies directly, write it in exactly, do "
+            "not substitute a pooled two-sample SE instead), plus a "
+            "two-sided p-value from a standard-normal reference "
+            "distribution. Apply it to TWO cell pairs: (a) a "
+            "PRE-SPECIFIED pair -- customers who only bought women's "
+            "merchandise vs. customers who only bought men's "
+            "merchandise (built from the `womens`/`mens` columns "
+            "already on w_te); (b) an ALGORITHM-CHOSEN pair -- the top "
+            "vs. bottom quintile of the Step opl4_scores CATE score "
+            "tau_te (top: tau_te >= its own 0.8-quantile; bottom: "
+            "tau_te <= its own 0.2-quantile; these two cutoffs, 0.8 and "
+            "0.2, are the exercise's own choice, write them in "
+            "directly, do not treat them as free parameters). On the "
+            "instructor's run, pair (a) gives GATEs of about 0.075 vs. "
+            "0.005 (difference about 0.071, SE about 0.010, p<0.001) "
+            "and pair (b) gives about 0.082 vs. 0.024 (difference "
+            "about 0.058, SE about 0.015, p<0.001) -- a pattern to "
             "check your own output against, not exact figures to "
             "reproduce."
         ),
@@ -1906,7 +2037,12 @@ PART_A_STEPS.update({
             "contributions for this individual, consistent with a "
             "low-predicted-risk defendant with no prior offenses -- a "
             "pattern to check your own output against, not exact figures "
-            "to reproduce."
+            "to reproduce. PITFALL: \"the test sample's own scaled-"
+            "feature mean\" means best_model.named_steps['scale'] "
+            "APPLIED to Xtest's mean (or the mean of the already-scaled "
+            "features) -- not Xtest's raw, unscaled mean. Passing the "
+            "unscaled mean into this formula breaks the efficiency "
+            "axiom (phi.sum() will not equal f_x - f_mean)."
         ),
     },
     "fair7_shap_general": {
@@ -1937,7 +2073,14 @@ PART_A_STEPS.update({
             "the SIGN of every feature's fair6_shap_linear contribution, "
             "though not its exact value (the nonlinear sigmoid redistributes "
             "magnitudes) -- a pattern to check your own output against, "
-            "not exact figures to reproduce."
+            "not exact figures to reproduce. PITFALL: shap.KernelExplainer's "
+            "actual first parameter is named `model`, not `f` -- even "
+            "though the lecture's own generic math notation writes it as "
+            "shap.KernelExplainer(f, background), the installed shap "
+            "package's real signature expects "
+            "shap.KernelExplainer(model=f, data=background); using f= "
+            "as a keyword raises a TypeError (positional use, "
+            "shap.KernelExplainer(f, background), works fine)."
         ),
     },
     "fair8_counterfactual": {

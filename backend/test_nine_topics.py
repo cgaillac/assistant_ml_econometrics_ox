@@ -101,6 +101,37 @@ def test_fair_steps_present_and_isolated_from_opl_and_hte():
         assert len(prompts.PART_A_STEPS[key]["task"]) > 50
 
 
+def test_opl_revision_adds_gatetest_step_without_renumbering():
+    """Round 17: the instructor's opl reference notebook was revised (one
+    new Section 5b, a GATE-difference test), not replaced with a new topic.
+    Confirm this landed as ONE new delegated step, opl5b_gatetest, inserted
+    between opl5_blpgates and opl7_targetcurve -- with the already-shipped
+    opl7_targetcurve/opl8_policytrees/opl9_multiaction step IDs left exactly
+    as they were (no renumbering), per this project's standing precedent
+    that a content revision to an EXISTING topic never touches already-
+    referenced step IDs."""
+    assert "opl5b_gatetest" in prompts.PART_A_STEPS
+    entry = prompts.PART_A_STEPS["opl5b_gatetest"]
+    assert "label" in entry and "task" in entry
+    assert "gate_diff" in entry["task"] or "GATE" in entry["task"]
+
+    opl_steps = [k for k in prompts.PART_A_STEPS if k.startswith("opl")]
+    assert set(opl_steps) == {
+        "opl2_avgeffects", "opl3_subgroup", "opl4_scores", "opl5_blpgates",
+        "opl5b_gatetest", "opl7_targetcurve", "opl8_policytrees", "opl9_multiaction",
+    }
+
+
+def test_opl_skeptical_reviewer_prompt_unchanged_by_revision():
+    """The opl Skeptical Reviewer persona was deliberately left unedited
+    this round (its three existing dimensions already cover the new step's
+    sample-splitting-validity concern) -- confirm it still exists and is
+    distinct from the other two Advanced-ML topics' personas."""
+    opl_prompt = prompts.SKEPTICAL_REVIEWER_PROMPTS["opl"]
+    assert opl_prompt != prompts.SKEPTICAL_REVIEWER_PROMPTS["hte"]
+    assert opl_prompt != prompts.SKEPTICAL_REVIEWER_PROMPTS["fairness"]
+
+
 def test_assist_endpoint_accepts_fair_step(client, auth_header):
     resp = client.post(
         "/v1/assist", json={"step": "fair2_groupmetrics"}, headers=auth_header
